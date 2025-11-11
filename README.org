@@ -1,0 +1,43 @@
+#+title: Vector Notes
+
+* Vector search your notes for simularish nodes in org roam.
+
+** Logging Configuration
+
+The logger is configurable and by default only logs errors. You can configure logging in three ways:
+
+*** Environment Variables
+#+begin_src bash
+# Set log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+export VECTOR_ORG_LOG_LEVEL=INFO
+
+# Enable file logging
+export VECTOR_ORG_LOG_TO_FILE=true
+
+# Set custom log directory
+export VECTOR_ORG_LOG_DIR=/path/to/logs
+#+end_src
+
+*** Command Line Options
+#+begin_src bash
+# Set log level
+python main.py --log-level INFO embed --dir ~/org
+
+# Enable file logging
+python main.py --log-to-file embed --dir ~/org
+
+# Set custom log directory
+python main.py --log-dir /path/to/logs embed --dir ~/org
+#+end_src
+
+*** Configuration File
+Copy =logging.conf.example= to =logging.conf= and set your preferred values, then source it:
+#+begin_src bash
+source logging.conf
+python main.py embed --dir ~/org
+#+end_src
+
+*** Default Behavior
+- Log level: ERROR (only errors are logged)
+- File logging: Disabled
+- Console logging: Always enabled for errors and above
