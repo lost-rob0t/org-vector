@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import argparse
 import os
+import json
 
 import org_vector.embeddings as e
 import org_vector.parse_org_files as o
@@ -10,7 +11,8 @@ def main(mode: str, query: str, roam_dir: str, path: str, api_url: str, model: s
     vector_client = e.VectorClient(api_url=api_url,
                                    model=model,
                                    db_path=path,
-                                   collection_name=collection_name)
+                                   collection_name=collection_name,
+                                   )
  
     if mode == "embed":
         roam = o.OrgRoam(roam_dir)
@@ -26,13 +28,18 @@ def main(mode: str, query: str, roam_dir: str, path: str, api_url: str, model: s
     if mode == "emacs":
         resp = vector_client.query(query)
         for r in resp:
-            print(f"* Result [[file://{r.metadata['filepath']}][{r.metadata['title']}]]:\n{r.page_content}")
+            print(f"* Result [[file://{r.metadata['filepath']}][{r.metadata.get('title', 'Result')}]]:\n{r.page_content}")
+    if mode == "json":
+        resp = vector_client.query(query)
+        for r in resp:
+            print(json.dumps(r.model_dump()))
+
 
 if __name__ == '__main__':
     default_path = os.path.expanduser("~/.cache/vector-org/")
 
     parser = argparse.ArgumentParser(description="A simple vector store util for org-roam")
-    parser.add_argument("mode", choices=["embed", "search", "emacs"],
+    parser.add_argument("mode", choices=["embed", "search", "emacs", "json"],
                         help="Mode of operation: 'embed' to index files or 'search' to query them.")
     parser.add_argument("--dir", "-d", help="Org roam directory")
     parser.add_argument("--model", "-m", help="embeddings model (OLLAMA)", default="nomic-embed-text")
