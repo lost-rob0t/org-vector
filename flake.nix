@@ -10,7 +10,8 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        pythonEnv = pkgs.python3.withPackages (ps: with ps; [
+        # Use Python 3.12 for better compatibility with current packages
+        pythonEnv = pkgs.python312.withPackages (ps: with ps; [
           adjusttext
           langchain
           orgparse
