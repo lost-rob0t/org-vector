@@ -1,0 +1,20 @@
+/org_vector/__pycache__/
+/.context/
+
+# Local environments and caches
+/.direnv/
+/__pycache__/
+**/__pycache__/
+
+# Local vector DB artifacts
+/org/
+/org_vector/org/
+/all-org/
+/test-org/
+/test-new-version/
+/test-sentence/
+/test-sentence-v2/
+/test-sentence-v3/
+
+# Local scratch outputs
+/result

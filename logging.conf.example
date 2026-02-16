@@ -1,0 +1,14 @@
+# Vector-Org Logging Configuration
+# Copy this file to logging.conf or set environment variables directly
+
+# Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+# Default: ERROR (only log errors)
+VECTOR_ORG_LOG_LEVEL=ERROR
+
+# Enable file logging: true/false
+# Default: false
+VECTOR_ORG_LOG_TO_FILE=false
+
+# Custom log directory (optional)
+# Default: vector_org/logs/
+# VECTOR_ORG_LOG_DIR=/path/to/custom/logs

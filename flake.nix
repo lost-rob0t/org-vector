@@ -22,6 +22,7 @@
           scikit-learn
           ollama
           chromadb
+          ps."inotify-simple"
           langchain-chroma
           langchain-ollama
           # Additional commonly needed packages
@@ -41,15 +42,34 @@
           installPhase = ''
             mkdir -p $out/bin
             mkdir -p $out/lib/org-vector
+            mkdir -p $out/share/org-vector
             mkdir -p $out/share/emacs/site-lisp
 
             # Install Python modules
             cp -r org_vector $out/lib/org-vector/
             cp main.py $out/lib/org-vector/
+            cat > $out/share/org-vector/config.toml <<EOF
+            [service]
+            dir = "~/Documents/Notes/"
+            path = "~/.cache/vector-org/"
+            model = "all-MiniLM-L6-v2"
+            collection = "org-roam"
+            debounce_seconds = 1.0
+            poll_timeout_ms = 500
+
+            [logging]
+            level = "INFO"
+            to_file = false
+            EOF
 
             # Create wrapper script
             cat > $out/bin/org-vector <<EOF
             #!${pkgs.bash}/bin/bash
+            default_config_path="\$HOME/.config/org-vector/config.toml"
+            if [ ! -f "\$default_config_path" ]; then
+              mkdir -p "\$(dirname "\$default_config_path")"
+              cp "$out/share/org-vector/config.toml" "\$default_config_path"
+            fi
             exec ${pythonEnv}/bin/python3 $out/lib/org-vector/main.py "\$@"
             EOF
             chmod +x $out/bin/org-vector

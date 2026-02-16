@@ -1,7 +1,7 @@
 from orgparse import load
 import traceback
 import pandas as pd
-from typing import List, Optional
+from typing import List, Optional, Tuple
 import os
 from glob import glob
 import re
@@ -108,10 +108,16 @@ class OrgRoam:
     def get_files(self, get_full: bool = False) -> List[str]:
         expanded_path = os.path.expanduser(self.path)
         path = os.path.join(expanded_path, "**", "*.org")
-        files = set(glob(path, recursive=True))
+        matched_paths = glob(path, recursive=True)
+        files = sorted(file_path for file_path in matched_paths if os.path.isfile(file_path))
+
+        skipped = len(matched_paths) - len(files)
+        if skipped:
+            log.warning(f"Skipped {skipped} non-file .org path(s) under {expanded_path}")
 
         if not get_full:
-            files = [os.path.splitext(os.path.basename(file))[0] for file in files]
+            note_titles = sorted({os.path.splitext(os.path.basename(file))[0] for file in files})
+            return note_titles
 
         return files
 
@@ -162,7 +168,7 @@ class OrgRoam:
 
         return org_node
 
-    def parse_org(self, root):
+    def parse_org(self, root) -> Optional[Tuple[str, List[OrgNode]]]:
         """Parse the org file, returns title and list of top-level nodes."""
         try:
             heading = self.get_title(root)
@@ -182,25 +188,41 @@ class OrgRoam:
         except Exception as e:
             log.error(f"Error while parsing org file: {e}\n{traceback.format_exc()}")
 
-    def parse_files(self):
-        """Parse all org files, returns a list of OrgFile objects with tree structure."""
+    def parse_file(self, file_path: str) -> Optional[OrgFile]:
+        if not os.path.isfile(file_path):
+            log.warning(f"Skipping non-file org path: {file_path}")
+            return None
+
+        try:
+            log.info(f"parsing: {file_path}")
+            root = load(file_path)
+            parsed = self.parse_org(root)
+            if not parsed:
+                log.warning(f"Could not parse org file: {file_path}")
+                return None
+
+            title, nodes = parsed
+            org_id = self.get_id(root)
+            parsed_org = OrgFile(
+                file_path=file_path,
+                body=nodes,
+                title=title
+            )
+            if org_id:
+                parsed_org.id = org_id
+            return parsed_org
+        except Exception as e:
+            log.error(f"Error processing file {file_path}: {e}")
+            return None
+
+    def parse_files(self, file_paths: Optional[List[str]] = None) -> List[OrgFile]:
+        """Parse org files and return a list of OrgFile objects with tree structure."""
         files = []
-        
-        for file_path in self.get_files(get_full=True):
-            try:
-                log.info(f"parsing: {file_path}")
-                root = load(file_path)
-                title, nodes = self.parse_org(root)
-                org_id = self.get_id(root)
-                parsed_org = OrgFile(
-                    file_path=file_path,
-                    body=nodes,
-                    title=title
-                )
-                if org_id:
-                    parsed_org.id = org_id
-                files.append(parsed_org)
-            except Exception as e:
-                log.error(f"Error processing file {file_path}: {e}")
-                
+        paths = file_paths if file_paths is not None else self.get_files(get_full=True)
+
+        for file_path in paths:
+            parsed = self.parse_file(file_path)
+            if parsed is not None:
+                files.append(parsed)
+
         return files

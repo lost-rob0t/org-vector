@@ -34,7 +34,7 @@
   :type 'directory
   :group 'ai)
 
-(defcustom org-vector-db "~/.cache/vector-org/"
+(defcustom org-vector-db "~/.cache/org-vector/"
   "Path to store vector embeddings."
   :type 'directory
   :group 'ai)
@@ -61,7 +61,7 @@
     (string-join
      (seq-filter (lambda (line)
                    (not (or (string-match-p "Failed to send telemetry event" line)
-                           (string-match-p "capture() takes 1 positional argument" line))))
+                            (string-match-p "capture() takes 1 positional argument" line))))
                  lines)
      "\n")))
 
@@ -214,18 +214,18 @@
                        :name "org-vector"
                        :buffer process-buffer
                        :command (list org-vector-python-bin
-                                     (expand-file-name org-vector-main-script)
-                                     "emacs"
-                                     "-d" (expand-file-name org-vector-dir)
-                                     "-p" (expand-file-name org-vector-db)
-                                     "-m" org-vector-model
-                                     "-u" org-vector-url
-                                     "-q" query)
+                                      (expand-file-name org-vector-main-script)
+                                      "emacs"
+                                      "-d" (expand-file-name org-vector-dir)
+                                      "-p" (expand-file-name org-vector-db)
+                                      "-m" org-vector-model
+                                      "-u" org-vector-url
+                                      "-q" query)
                        :sentinel (lambda (proc event)
-                                  (org-vector--process-finished proc event query)
-                                  ;; Clean up process buffer
-                                  (when (buffer-live-p (process-buffer proc))
-                                    (kill-buffer (process-buffer proc)))))))
+                                   (org-vector--process-finished proc event query)
+                                   ;; Clean up process buffer
+                                   (when (buffer-live-p (process-buffer proc))
+                                     (kill-buffer (process-buffer proc)))))))
         (setq org-vector--current-process process)))))
 
 (defun org-vector-search (query)
@@ -284,12 +284,12 @@
                        :name "org-vector-embed"
                        :buffer process-buffer
                        :command (list org-vector-python-bin
-                                     (expand-file-name org-vector-main-script)
-                                     "embed"
-                                     "-d" (expand-file-name org-vector-dir)
-                                     "-p" (expand-file-name org-vector-db)
-                                     "-m" org-vector-model
-                                     "-u" org-vector-url)
+                                      (expand-file-name org-vector-main-script)
+                                      "embed"
+                                      "-d" (expand-file-name org-vector-dir)
+                                      "-p" (expand-file-name org-vector-db)
+                                      "-m" org-vector-model
+                                      "-u" org-vector-url)
                        :sentinel #'org-vector--embed-finished)))
         (setq org-vector--embed-process process)
         (display-buffer process-buffer)))))

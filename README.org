@@ -2,6 +2,85 @@
 
 * Vector search your notes for simularish nodes in org roam.
 
+** Embedding Defaults
+
+- Default model is now =all-MiniLM-L6-v2= (SentenceTransformers).
+- The embedder applies instruction prefixes by default:
+  - =nomic-embed*= models: =search_document:= for indexed text and =search_query:= for queries
+  - =*e5*= models: =passage:= for indexed text and =query:= for queries
+  - everything else: a retrieval-focused natural-language instruction
+- You can override either side with CLI flags:
+
+#+begin_src bash
+# custom prefixes
+python main.py embed --dir ~/org --ingestion-instructions "passage:"
+python main.py search --query "project roadmap" --query-instructions "query:"
+
+# template form using {text}
+python main.py embed --dir ~/org \
+  --ingestion-instructions "Represent this note for retrieval: {text}"
+#+end_src
+
+** Retrieval Quality Notes
+
+- Re-embedding now replaces existing entries for each source file, which prevents duplicate chunks from older indexing runs.
+- Nodes without explicit Org =ID= properties receive stable auto-generated storage IDs, so repeated indexing remains consistent.
+- Search now applies simple result diversification to avoid over-returning many near-identical chunks from one file.
+- Embed now performs incremental sync by file metadata (mtime + size): unchanged files are skipped, changed files are re-indexed, and removed files are deleted from the collection.
+- =update= is an alias for =embed=.
+- =query= is accepted as an alias for =search=, so both commands work:
+
+#+begin_src bash
+python main.py query --query "Python code"
+python main.py search --query "Python code"
+python main.py update --dir ~/org --path ~/.cache/org-vector/
+#+end_src
+
+- Ingest now skips path matches like directories that happen to end in =.org=.
+
+** Background Indexer Service (inotify)
+
+Run continuous indexing with Linux inotify by using =serve= mode. The service performs one initial sync, then watches your Org directory and re-runs incremental sync when =.org= files change.
+
+This mode is Linux-specific and requires the Python package =inotify-simple=.
+
+*** Config file
+
+The service reads =~/.config/org-vector/config.toml= by default. You can copy and adapt =config.toml.example=:
+
+#+begin_src bash
+mkdir -p ~/.config/org-vector
+cp config.toml.example ~/.config/org-vector/config.toml
+#+end_src
+
+Minimal config:
+
+#+begin_src toml
+[service]
+dir = "~/Documents/Notes/"
+path = "~/.cache/vector-org/"
+model = "all-MiniLM-L6-v2"
+collection = "org-roam"
+
+[logging]
+level = "INFO"
+to_file = false
+#+end_src
+
+*** Run
+
+#+begin_src bash
+# use default ~/.config/org-vector/config.toml
+python main.py serve
+
+# or provide a custom config path
+python main.py serve --config /path/to/config.toml
+#+end_src
+
+Optional serve-time overrides are available with normal flags (for example =--dir=, =--path=, =--model=, =--collection=, =--debounce-seconds=, =--poll-timeout-ms=).
+
+When started through =nix run .# -- ...=, the wrapper now installs a default config at =~/.config/org-vector/config.toml= on first run if it does not already exist.
+
 ** Logging Configuration
 
 The logger is configurable and by default only logs errors. You can configure logging in three ways:

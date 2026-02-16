@@ -39,7 +39,9 @@ setup(
         "langchain-ollama>=0.1.0",
         "pandas>=1.3.0",
         "numpy>=1.20.0",
-        "posthog <=6.0.0"
+        "posthog <=6.0.0",
+        "inotify-simple>=1.3.5; platform_system == 'Linux'",
+        "tomli>=2.0.1; python_version < '3.11'",
     ],
     extras_require={
         "dev": [

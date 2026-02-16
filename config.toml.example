@@ -1,0 +1,17 @@
+[service]
+dir = "~/Documents/Notes/"
+path = "~/.cache/vector-org/"
+model = "all-MiniLM-L6-v2"
+collection = "org-roam"
+debounce_seconds = 1.0
+poll_timeout_ms = 500
+
+# Optional:
+# url = "http://localhost:11434"
+# ingestion_instructions = "Represent this org note for semantic retrieval:"
+# query_instructions = "Represent this search query for retrieving relevant org notes:"
+
+[logging]
+level = "INFO"
+to_file = false
+# dir = "~/.cache/org-vector/logs"
