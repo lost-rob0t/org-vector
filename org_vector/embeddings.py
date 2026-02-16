@@ -30,7 +30,6 @@ class VectorClient:
     def __init__(
         self,
         db_path: str,
-        api_url: Optional[str] = None,
         model: Optional[Union[SentenceTransformer, str]] = None,
         chroma_client: Optional[PersistentClient] = None,
         model_name: str = "all-MiniLM-L6-v2",
@@ -39,7 +38,6 @@ class VectorClient:
         query_instructions: Optional[str] = None,
         batch_size: int = 32,
     ):
-        self.api_url = api_url
         self.db_path = db_path
         self.model_name = self._resolve_model_name(model, model_name)
         self.collection_name = collection_name
@@ -528,7 +526,7 @@ class VectorClient:
 
         log.info(f"Searching for {query}")
         
-        query_text = self._apply_instruction(self.query_instructions, query)
+        query_text = self._apply_instruction(self.ingestion_instructions, query)
             
         query_embedding = self.model.encode(query_text).tolist()
         n_candidates = max(k * 6, k)

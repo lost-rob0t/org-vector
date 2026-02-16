@@ -1,7 +1,7 @@
 import org_vector.embeddings as e
 import org_vector.parse_org_files as o
 roam = o.OrgRoam("~/Documents/Notes/org/roam/")
-v = e.VectorClient(api_url="http://localhost:11434", db_path="test-org")
+v = e.VectorClient(db_path="test-org")
 
 resp = v.query("Vector search")
 

@@ -31,18 +31,9 @@
   :type 'directory
   :group 'org-vector)
 
-(defcustom org-vector-model "nomic-embed-text"
-  "Embeddings model to use.
-\='nomic-embed-text\' for local Ollama,
-\='all-MiniLM-L6-v2\' for sentence-transformers default."
+(defcustom org-vector-model "all-MiniLM-L6-v2"
+  "Embeddings model to use."
   :type 'string
-  :group 'org-vector)
-
-(defcustom org-vector-url nil
-  "Optional embeddings API URL (e.g., Ollama endpoint).
-If nil, uses local sentence-transformers model."
-  :type '(choice (const :tag "Local (sentence-transformers)" nil)
-                 (string :tag "API URL"))
   :group 'org-vector)
 
 (defcustom org-vector-collection-name "org-roam"
@@ -154,9 +145,6 @@ If MODE is specified, adds it as the first positional argument."
     (push org-vector-collection-name args)
     (push "--log-level" args)
     (push org-vector-log-level args)
-    (when org-vector-url
-      (push "-u" args)
-      (push org-vector-url args))
     (when org-vector-log-to-file
       (push "--log-to-file" args))
     (when org-vector-ingestion-instructions
@@ -229,7 +217,6 @@ If MODE is specified, adds it as the first positional argument."
                   (insert "Unknown error - check Python script and dependencies.\n\n")
                 (insert (format "#+BEGIN_EXAMPLE\n%s#+END_EXAMPLE\n\n" filtered-error-output)))
               (insert "** Troubleshooting:\n")
-              (insert "- Check that Ollama is running (if using API URL)\n")
               (insert "- Verify that the model is downloaded\n")
               (insert "- Ensure the vector database has been created (run M-x org-vector-embed)\n")
               (insert "- Check Python dependencies\n\n")

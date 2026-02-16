@@ -43,7 +43,7 @@ else:
 if not duplicates and parsed_files:
     print("\nTesting vector embedding...")
     try:
-        v = e.VectorClient(api_url="http://localhost:11434", db_path="org-vector-test")
+        v = e.VectorClient(db_path="org-vector-test")
         
         # Test with first file only
         test_file = parsed_files[0]

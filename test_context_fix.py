@@ -77,11 +77,9 @@ def test_nested_content_embedding():
         # Create a temporary vector DB path
         with tempfile.TemporaryDirectory() as db_tmpdir:
             try:
-                # Note: This will fail if Ollama isn't running, but we can still test the document creation
                 client = VectorClient(
-                    api_url="http://localhost:11434",
                     db_path=db_tmpdir,
-                    model="nomic-embed-text"
+                    model="all-MiniLM-L6-v2"
                 )
 
                 docs = client.make_document(org_file)
@@ -106,7 +104,7 @@ def test_nested_content_embedding():
                 print("✓ Hierarchical context is preserved")
 
             except Exception as e:
-                print(f"Note: Could not test embedding (Ollama may not be running): {e}")
+                print(f"Note: Could not test embedding: {e}")
                 print("But document creation logic was tested successfully!")
 
         return True

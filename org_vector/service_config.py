@@ -75,7 +75,6 @@ class ServiceConfig:
     roam_dir: str
     path: str = os.path.expanduser("~/.cache/vector-org/")
     model: str = "all-MiniLM-L6-v2"
-    api_url: Optional[str] = None
     collection_name: str = "org-roam"
     ingestion_instructions: Optional[str] = None
     query_instructions: Optional[str] = None
@@ -108,7 +107,6 @@ def load_service_config(config_path: str = DEFAULT_CONFIG_PATH) -> ServiceConfig
 
     path = os.path.expanduser(str(service.get("path") or "~/.cache/vector-org/"))
     model = str(service.get("model") or "all-MiniLM-L6-v2")
-    api_url = _optional_text(service.get("url"))
     collection_name = str(service.get("collection") or "org-roam")
     ingestion_instructions = _optional_text(service.get("ingestion_instructions"))
     query_instructions = _optional_text(service.get("query_instructions"))
@@ -129,7 +127,6 @@ def load_service_config(config_path: str = DEFAULT_CONFIG_PATH) -> ServiceConfig
         roam_dir=os.path.expanduser(roam_dir),
         path=path,
         model=model,
-        api_url=api_url,
         collection_name=collection_name,
         ingestion_instructions=ingestion_instructions,
         query_instructions=query_instructions,

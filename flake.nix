@@ -75,7 +75,7 @@
             chmod +x $out/bin/org-vector
 
             # Install Emacs Lisp package
-            cp org-vector.el $out/share/emacs/site-lisp/
+            cp lisp/org-vector.el $out/share/emacs/site-lisp/
           '';
 
           meta = with pkgs.lib; {

@@ -28,7 +28,6 @@ class BackgroundIndexerService:
         self.vector_client = VectorClient(
             db_path=config.path,
             model_name=config.model,
-            api_url=config.api_url,
             collection_name=config.collection_name,
             ingestion_instructions=config.ingestion_instructions,
             query_instructions=config.query_instructions,

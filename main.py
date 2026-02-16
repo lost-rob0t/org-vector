@@ -16,14 +16,12 @@ def main(
     roam_dir: str,
     path: str,
     model: str,
-    api_url: Optional[str] = None,
     collection_name: str = "org-roam",
     ingestion_instructions: Optional[str] = None,
     query_instructions: Optional[str] = None,
 ):
     vector_client = e.VectorClient(
         model_name=model,
-        api_url=api_url,
         db_path=path,
         collection_name=collection_name,
         ingestion_instructions=ingestion_instructions,
@@ -76,7 +74,6 @@ def _resolve_service_config(args: argparse.Namespace) -> ServiceConfig:
     roam_dir = os.path.expanduser(args.dir) if args.dir else config.roam_dir
     path = os.path.expanduser(args.path) if args.path else config.path
     model = args.model or config.model
-    api_url = args.url if args.url is not None else config.api_url
     collection_name = args.collection or config.collection_name
     ingestion_instructions = (
         args.ingestion_instructions
@@ -107,7 +104,6 @@ def _resolve_service_config(args: argparse.Namespace) -> ServiceConfig:
         roam_dir=roam_dir,
         path=path,
         model=model,
-        api_url=api_url,
         collection_name=collection_name,
         ingestion_instructions=ingestion_instructions,
         query_instructions=query_instructions,
@@ -127,7 +123,6 @@ if __name__ == '__main__':
                         help="Mode: embed/update sync, search/query retrieval, or serve for inotify background indexing.")
     parser.add_argument("--dir", "-d", help="Org roam directory")
     parser.add_argument("--model", "-m", help="embeddings model")
-    parser.add_argument("--url", "-u", help="Optional embeddings API URL")
     parser.add_argument("--path", "-p", help="Path to store embeddings in")
     parser.add_argument("--query", "-q", help="Search query text")
     parser.add_argument(
@@ -197,7 +192,6 @@ if __name__ == '__main__':
         roam_dir=os.path.expanduser(args.dir or ""),
         query=args.query or "",
         model=model,
-        api_url=args.url,
         collection_name=collection_name,
         ingestion_instructions=args.ingestion_instructions,
         query_instructions=args.query_instructions,
