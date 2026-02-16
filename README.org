@@ -27,6 +27,7 @@ python main.py embed --dir ~/org \
 - Nodes without explicit Org =ID= properties receive stable auto-generated storage IDs, so repeated indexing remains consistent.
 - Search now applies simple result diversification to avoid over-returning many near-identical chunks from one file.
 - Embed now performs incremental sync by file metadata (mtime + size): unchanged files are skipped, changed files are re-indexed, and removed files are deleted from the collection.
+- Embedding runs in batches to reduce peak memory usage during indexing.
 - =update= is an alias for =embed=.
 - =query= is accepted as an alias for =search=, so both commands work:
 

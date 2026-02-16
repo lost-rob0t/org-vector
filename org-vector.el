@@ -18,17 +18,6 @@
   "Customization group for AI-related packages."
   :group 'applications)
 
-(defcustom org-vector-python-bin "python3"
-  "Path to Python interpreter used to run vectored-notes main.py."
-  :type 'string
-  :group 'ai)
-
-(defcustom org-vector-main-script
-  "~/Documents/Projects/vectored-notes/main.py"
-  "Path to main.py in vectored-notes."
-  :type 'string
-  :group 'ai)
-
 (defcustom org-vector-dir "~/Documents/Notes/org/roam/"
   "Path to your Org-Roam directory."
   :type 'directory
@@ -54,6 +43,10 @@
 
 (defvar org-vector--embed-process nil
   "Current running org-vector embedding process.")
+
+(defun org-vector--resolve-command ()
+  "Return the resolved `org-vector` executable path."
+  (executable-find "org-vector"))
 
 (defun org-vector--filter-output (output)
   "Filter unwanted telemetry errors from OUTPUT."
@@ -99,12 +92,10 @@
 (defun org-vector--validate-setup ()
   "Validate that the required files and directories exist."
   (let ((errors '()))
-    (unless (file-exists-p (expand-file-name org-vector-main-script))
-      (push (format "Python script not found: %s" org-vector-main-script) errors))
     (unless (file-directory-p (expand-file-name org-vector-dir))
       (push (format "Org directory not found: %s" org-vector-dir) errors))
-    (unless (executable-find org-vector-python-bin)
-      (push (format "Python binary not found: %s" org-vector-python-bin) errors))
+    (unless (org-vector--resolve-command)
+      (push "org-vector command not found in PATH" errors))
     errors))
 
 (defun org-vector--process-finished (process event query)
@@ -209,15 +200,15 @@
       (message "Starting vector search...")
       
       ;; Start async process
-      (let* ((process-buffer (generate-new-buffer " *org-vector-process*"))
-             (process (make-process
-                       :name "org-vector"
-                       :buffer process-buffer
-                       :command (list org-vector-python-bin
-                                      (expand-file-name org-vector-main-script)
-                                      "emacs"
-                                      "-d" (expand-file-name org-vector-dir)
-                                      "-p" (expand-file-name org-vector-db)
+       (let* ((process-buffer (generate-new-buffer " *org-vector-process*"))
+              (command (org-vector--resolve-command))
+              (process (make-process
+                        :name "org-vector"
+                        :buffer process-buffer
+                        :command (list command
+                                       "emacs"
+                                       "-d" (expand-file-name org-vector-dir)
+                                       "-p" (expand-file-name org-vector-db)
                                       "-m" org-vector-model
                                       "-u" org-vector-url
                                       "-q" query)
@@ -279,15 +270,15 @@
       (org-vector--kill-embed-process)
       
       (message "Starting embedding process...")
-      (let* ((process-buffer (get-buffer-create "*org-vector-embed*"))
-             (process (make-process
-                       :name "org-vector-embed"
-                       :buffer process-buffer
-                       :command (list org-vector-python-bin
-                                      (expand-file-name org-vector-main-script)
-                                      "embed"
-                                      "-d" (expand-file-name org-vector-dir)
-                                      "-p" (expand-file-name org-vector-db)
+       (let* ((process-buffer (get-buffer-create "*org-vector-embed*"))
+              (command (org-vector--resolve-command))
+              (process (make-process
+                        :name "org-vector-embed"
+                        :buffer process-buffer
+                        :command (list command
+                                       "embed"
+                                       "-d" (expand-file-name org-vector-dir)
+                                       "-p" (expand-file-name org-vector-db)
                                       "-m" org-vector-model
                                       "-u" org-vector-url)
                        :sentinel #'org-vector--embed-finished)))

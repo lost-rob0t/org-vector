@@ -37,6 +37,7 @@ class VectorClient:
         collection_name: str = "org-roam",
         ingestion_instructions: Optional[str] = None,
         query_instructions: Optional[str] = None,
+        batch_size: int = 32,
     ):
         self.api_url = api_url
         self.db_path = db_path
@@ -49,13 +50,16 @@ class VectorClient:
         self.query_instructions = (
             query_instructions if query_instructions is not None else default_query
         )
+        self.batch_size = self._normalize_batch_size(batch_size)
 
         self.model = self._load_model(model, self.model_name)
+        self.model_dimension = self._get_model_dimension(self.model)
         self.chroma_client = chroma_client or PersistentClient(
             path=db_path,
             settings=Settings(anonymized_telemetry=False),
         )
-        self.collection = self.chroma_client.get_or_create_collection(name=collection_name)
+        self._get_or_create_collection()
+        self._ensure_collection_dimension()
 
     @staticmethod
     def _resolve_model_name(
@@ -78,12 +82,136 @@ class VectorClient:
         return SentenceTransformer(model_name)
 
     @staticmethod
+    def _normalize_batch_size(batch_size: int) -> int:
+        try:
+            normalized = int(batch_size)
+        except (TypeError, ValueError):
+            return 32
+        return normalized if normalized > 0 else 32
+
+    @staticmethod
+    def _iter_batch_ranges(total: int, batch_size: int):
+        for start in range(0, total, batch_size):
+            end = min(start + batch_size, total)
+            yield start, end
+
+    @staticmethod
+    def _get_model_dimension(model: SentenceTransformer) -> int:
+        try:
+            dimension = model.get_sentence_embedding_dimension()
+            if isinstance(dimension, int) and dimension > 0:
+                return dimension
+        except Exception:
+            pass
+
+        probe = model.encode("dimension probe")
+        try:
+            return len(probe)
+        except TypeError:
+            return len(probe.tolist())
+
+    def _collection_metadata(self) -> Dict[str, Union[str, int]]:
+        return {
+            "embedding_dimension": self.model_dimension,
+            "embedding_model": self.model_name,
+        }
+
+    def _get_or_create_collection(self) -> None:
+        metadata = self._collection_metadata()
+        try:
+            self.collection = self.chroma_client.get_or_create_collection(
+                name=self.collection_name,
+                metadata=metadata,
+            )
+        except TypeError:
+            self.collection = self.chroma_client.get_or_create_collection(name=self.collection_name)
+
+    @staticmethod
+    def _extract_dimension_from_metadata(metadata: Optional[dict]) -> Optional[int]:
+        if not isinstance(metadata, dict):
+            return None
+
+        for key in ("embedding_dimension", "dimension", "vector_dimension", "embedding_dim"):
+            value = metadata.get(key)
+            if value is None:
+                continue
+            try:
+                value_int = int(value)
+            except (TypeError, ValueError):
+                continue
+            if value_int > 0:
+                return value_int
+
+        return None
+
+    def _get_collection_dimension(self) -> Optional[int]:
+        metadata_dimension = self._extract_dimension_from_metadata(
+            getattr(self.collection, "metadata", None)
+        )
+        if metadata_dimension is not None:
+            return metadata_dimension
+
+        inner_collection = getattr(self.collection, "_collection", None)
+        metadata_dimension = self._extract_dimension_from_metadata(
+            getattr(inner_collection, "metadata", None)
+        )
+        if metadata_dimension is not None:
+            return metadata_dimension
+
+        if not hasattr(self.collection, "peek"):
+            return None
+
+        try:
+            result = self.collection.peek(limit=1, include=["embeddings"])
+        except Exception as error:
+            log.warning(f"Could not read collection dimension: {error}")
+            return None
+
+        if not isinstance(result, dict):
+            return None
+
+        embeddings = result.get("embeddings") or []
+        if not embeddings or not embeddings[0]:
+            return None
+
+        return len(embeddings[0])
+
+    def _reset_collection(self, reason: Optional[str] = None) -> None:
+        if reason:
+            log.warning("Resetting collection '%s': %s", self.collection_name, reason)
+        else:
+            log.warning(
+                "Resetting collection '%s' to match model dimension %s.",
+                self.collection_name,
+                self.model_dimension,
+            )
+
+        try:
+            self.chroma_client.delete_collection(name=self.collection_name)
+        except Exception as error:
+            raise RuntimeError(
+                f"Could not reset collection '{self.collection_name}' to match model dimension {self.model_dimension}: {error}"
+            ) from error
+
+        self._get_or_create_collection()
+
+    def _ensure_collection_dimension(self) -> None:
+        existing_dimension = self._get_collection_dimension()
+        if existing_dimension is None:
+            return
+        if existing_dimension == self.model_dimension:
+            return
+
+        log.warning(
+            "Collection '%s' dimension %s does not match model dimension %s; recreating collection.",
+            self.collection_name,
+            existing_dimension,
+            self.model_dimension,
+        )
+        self._reset_collection()
+
+    @staticmethod
     def _default_instructions(model_name: str) -> Tuple[str, str]:
-        lower_name = model_name.lower()
-        if "nomic-embed" in lower_name:
-            return ("search_document:", "search_query:")
-        if "e5" in lower_name:
-            return ("passage:", "query:")
         return (
             "Represent this org note for semantic retrieval:",
             "Represent this search query for retrieving relevant org notes:",
@@ -100,6 +228,19 @@ class VectorClient:
         if normalized_instruction.endswith(":"):
             return f"{normalized_instruction} {text}"
         return f"{normalized_instruction}\n\n{text}"
+
+    @staticmethod
+    def _is_dimension_mismatch_error(error: Exception) -> bool:
+        message = str(error).lower()
+        if "dimension" not in message:
+            return False
+        if "collection expecting embedding with dimension" in message:
+            return True
+        if "dimension mismatch" in message:
+            return True
+        if "expected" in message and "got" in message:
+            return True
+        return False
 
     def _get_node_storage_id(self, org_file: OrgFile, node: OrgNode, index: int) -> str:
         if node.id and str(node.id).strip():
@@ -335,10 +476,6 @@ class VectorClient:
         if not docs:
             return
 
-        texts = [doc.page_content for doc in docs]
-        embedding_texts = [self._apply_instruction(self.ingestion_instructions, text) for text in texts]
-        embeddings = self.model.encode(embedding_texts).tolist()
-
         unique_ids = self._ensure_unique_ids(node_ids, org_file.file_path)
 
         try:
@@ -346,17 +483,43 @@ class VectorClient:
         except Exception as delete_error:
             log.warning(f"Could not clear prior embeddings for {org_file.file_path}: {delete_error}")
 
-        payload = {
-            "ids": unique_ids,
-            "embeddings": embeddings,
-            "documents": texts,
-            "metadatas": [doc.metadata for doc in docs],
-        }
-        
-        if hasattr(self.collection, "upsert"):
-            self.collection.upsert(**payload)
-        else:
-            self.collection.add(**payload)
+        def _upsert_batches() -> None:
+            for start, end in self._iter_batch_ranges(len(docs), self.batch_size):
+                batch_docs = docs[start:end]
+                batch_texts = [doc.page_content for doc in batch_docs]
+                embedding_texts = [
+                    self._apply_instruction(self.ingestion_instructions, text)
+                    for text in batch_texts
+                ]
+                batch_embeddings = self.model.encode(
+                    embedding_texts,
+                    batch_size=min(self.batch_size, len(batch_texts)),
+                ).tolist()
+                payload = {
+                    "ids": unique_ids[start:end],
+                    "embeddings": batch_embeddings,
+                    "documents": batch_texts,
+                    "metadatas": [doc.metadata for doc in batch_docs],
+                }
+                if hasattr(self.collection, "upsert"):
+                    self.collection.upsert(**payload)
+                else:
+                    self.collection.add(**payload)
+
+        try:
+            _upsert_batches()
+        except Exception as error:
+            if not self._is_dimension_mismatch_error(error):
+                raise
+
+            log.warning(
+                "Collection dimension mismatch while embedding %s; recreating collection and retrying.",
+                org_file.file_path,
+            )
+            self._reset_collection(
+                reason="dimension mismatch while embedding; full re-index required",
+            )
+            _upsert_batches()
 
     
     def query(self, query: str, k: int = 5) -> List[Document]:
