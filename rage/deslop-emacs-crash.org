@@ -144,5 +144,38 @@ env vars that are never read again. =--log-level INFO= does nothing.
 * TDD log
 (see commits on =rage/deslop-emacs-crash=; red→green evidence per test)
 
+** Iteration 1 — python core (commit 2382a7d)
+- Red: 9 of 14 tests failing (4 CLI module errors, fallback-id
+  determinism, query-instruction routing, default-instructions,
+  logger reconfiguration).
+- Discovery during red run: =_load_model= silently replaced injected
+  encoders with a real model load (new bug, E9) → duck-typed fix.
+- Green: 16/16 offline in ~5s.
+
+** Iteration 1 — emacs (commit da4f4d7)
+- Red: 4 of 9 ERT tests failing, including the exact E2 symptom:
+  success printed JSON yet errored ="Query failed: {…}"=.
+- Green: 9/9; byte-compile clean (was: 4 warnings incl. free variable).
+
+** Iteration 1 — packaging/hygiene (commit 3562b57)
+- flake/setup pruned; dead scripts deleted; versions aligned to 0.5.0;
+  black applied; flake8 config added.
+
 * Exact-head gate
-(pending)
+Head: =3562b57558e64315a94a782ad70f60e998ea9820=
+
+| Gate | Result |
+|---|---|
+| =python -m py_compile main.py org_vector/*.py= | PASS |
+| =pyright main.py org_vector= | 0 errors (start-commit baseline: 10 errors) |
+| =black --check main.py org_vector tests= | PASS |
+| =flake8 main.py org_vector tests= | PASS (setup.cfg, line length 100) |
+| =python test_context_fix.py= (16 offline unittest tests) | 16/16 PASS |
+| =emacs --batch -l tests/org-vector-test.el -f ert-run-tests-batch-and-exit= | 9/9 PASS |
+| =emacs -f batch-byte-compile lisp/org-vector.el= | clean, 0 warnings |
+| =nix build .#= | PASS (org-vector-0.5.0) |
+| =nix run .# -- query --path ~/.cache/org-vector/ --query "Python code" -k 2= | PASS (2 results, real DB) |
+| =nix run .# -- embed --path ~/.cache/org-vector/= | PASS (errors correctly: --dir required) |
+
+Merge state: branch =rage/deslop-emacs-crash= left unmerged for user
+comparison against =master=. No GitHub CI configured in this repo.
