@@ -1,6 +1,6 @@
 #+title: Vector Notes
 
-* Vector search your notes for simularish nodes in org roam.
+* Vector search your notes for similar headings in org-roam.
 
 ** Embedding Defaults
 
@@ -37,7 +37,36 @@ python main.py search --query "Python code"
 python main.py update --dir ~/org --path ~/.cache/org-vector/
 #+end_src
 
+- Search, emacs, and json output modes accept =-k/--results= to control the
+  number of results (default: 5):
+
+#+begin_src bash
+python main.py search --query "Python code" --results 10
+#+end_src
+
 - Ingest now skips path matches like directories that happen to end in =.org=.
+
+** Emacs Integration
+
+=lisp/org-vector.el= ships with the package (installed to
+=share/emacs/site-lisp= by the flake). Core commands:
+
+| Command | Description |
+|---|---|
+| =M-x org-vector-search= | Async vector search, results in a side window |
+| =M-x org-vector-search-at-point= | Search the word/region at point |
+| =M-x org-vector-embed= | Index org files (incremental) |
+| =M-x org-vector-start-service= / =org-vector-stop-service= | Background inotify service |
+| =M-x org-vector-gptel-query= | Insert search results at point |
+| =M-x org-vector-transient= | Transient menu for everything above |
+| =M-x org-vector-stop-all= | Kill all running org-vector processes |
+
+Customize =org-vector-dir=, =org-vector-db=, =org-vector-model=, and
+=org-vector-collection-name= to match your setup. The gptel tool
+=org_vector_search= is registered automatically when gptel is loaded.
+
+Requires Emacs 27.1+; =subr-x= and =transient= are required explicitly, so
+loading the file is self-contained.
 
 ** Background Indexer Service (inotify)
 

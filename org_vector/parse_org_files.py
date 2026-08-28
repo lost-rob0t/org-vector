@@ -100,14 +100,20 @@ class OrgRoam:
     def get_files(self, get_full: bool = False) -> List[str]:
         expanded_path = os.path.expanduser(self.path)
         matched_paths = glob(os.path.join(expanded_path, "**", "*.org"), recursive=True)
-        files = sorted(file_path for file_path in matched_paths if os.path.isfile(file_path))
+        files = sorted(
+            file_path for file_path in matched_paths if os.path.isfile(file_path)
+        )
 
         skipped = len(matched_paths) - len(files)
         if skipped:
-            log.warning("Skipped %d non-file .org path(s) under %s", skipped, expanded_path)
+            log.warning(
+                "Skipped %d non-file .org path(s) under %s", skipped, expanded_path
+            )
 
         if not get_full:
-            note_titles = sorted({os.path.splitext(os.path.basename(file))[0] for file in files})
+            note_titles = sorted(
+                {os.path.splitext(os.path.basename(file))[0] for file in files}
+            )
             return note_titles
 
         return files
@@ -153,7 +159,9 @@ class OrgRoam:
             try:
                 org_node.add_child(self.parse_node_recursive(child, level + 1))
             except Exception as error:
-                log.error("Error parsing child node in %s: %s", org_node.heading_text(), error)
+                log.error(
+                    "Error parsing child node in %s: %s", org_node.heading_text(), error
+                )
 
         return org_node
 

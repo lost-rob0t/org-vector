@@ -8,7 +8,11 @@ import org_vector.embeddings as e
 import org_vector.parse_org_files as o
 from org_vector.background_service import run_background_service
 from org_vector.logger import configure_logging
-from org_vector.service_config import DEFAULT_CONFIG_PATH, ServiceConfig, load_service_config
+from org_vector.service_config import (
+    DEFAULT_CONFIG_PATH,
+    ServiceConfig,
+    load_service_config,
+)
 
 DEFAULT_MODEL = "all-MiniLM-L6-v2"
 DEFAULT_COLLECTION = "org-roam"
@@ -35,14 +39,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "mode",
         choices=["embed", "update", "search", "query", "emacs", "json", "serve"],
-        help="Mode: embed/update sync, search/query retrieval, or serve for inotify background indexing.",
+        help="Mode: embed/update sync, search/query retrieval, "
+        "or serve for inotify background indexing.",
     )
     parser.add_argument("--dir", "-d", help="Org roam directory")
     parser.add_argument("--model", "-m", help="embeddings model")
     parser.add_argument("--path", "-p", help="Path to store embeddings in")
     parser.add_argument("--query", "-q", help="Search query text")
     parser.add_argument(
-        "--results", "-k",
+        "--results",
+        "-k",
         type=int,
         default=DEFAULT_RESULTS,
         help="Number of results to return for search/emacs/json modes (default: 5)",
@@ -62,11 +68,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to service config TOML (serve mode)",
     )
     parser.add_argument(
-        "--debounce-seconds", type=float,
+        "--debounce-seconds",
+        type=float,
         help="Debounce window before syncing after file events (serve mode)",
     )
     parser.add_argument(
-        "--poll-timeout-ms", type=int,
+        "--poll-timeout-ms",
+        type=int,
         help="Inotify poll timeout in milliseconds (serve mode)",
     )
     parser.add_argument(
@@ -74,7 +82,9 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         help="Set logging level (default: ERROR)",
     )
-    parser.add_argument("--log-to-file", action="store_true", help="Enable logging to file")
+    parser.add_argument(
+        "--log-to-file", action="store_true", help="Enable logging to file"
+    )
     parser.add_argument("--log-dir", help="Directory for log files")
     return parser
 
@@ -115,7 +125,9 @@ def main(
 
         files_to_index = sync_plan["to_index"]
         files = roam.parse_files(file_paths=files_to_index) if files_to_index else []
-        sync_stats = vector_client.sync_files(files, removed_files=sync_plan["to_remove"])
+        sync_stats = vector_client.sync_files(
+            files, removed_files=sync_plan["to_remove"]
+        )
 
         parse_failed = len(files_to_index) - len(files)
         print(

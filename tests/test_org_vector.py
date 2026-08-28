@@ -76,8 +76,12 @@ class FallbackIdTests(unittest.TestCase):
             second = OrgRoam(tmpdir).parse_files()[0]
 
             client = make_vector_client()
-            ids_first = [doc.metadata["storage_id"] for doc in client.make_document(first)]
-            ids_second = [doc.metadata["storage_id"] for doc in client.make_document(second)]
+            ids_first = [
+                doc.metadata["storage_id"] for doc in client.make_document(first)
+            ]
+            ids_second = [
+                doc.metadata["storage_id"] for doc in client.make_document(second)
+            ]
 
             self.assertTrue(all(sid.startswith("auto-") for sid in ids_first))
             self.assertEqual(ids_first, ids_second)
@@ -249,7 +253,10 @@ class DiversifyTests(unittest.TestCase):
 
         client = make_vector_client()
         docs = [
-            Document(page_content=f"d{i}", metadata={"filepath": "f1.org" if i < 2 else "f2.org", "path": f"p{i}"})
+            Document(
+                page_content=f"d{i}",
+                metadata={"filepath": "f1.org" if i < 2 else "f2.org", "path": f"p{i}"},
+            )
             for i in range(4)
         ]
         picked = client._diversify_documents(docs, 3)

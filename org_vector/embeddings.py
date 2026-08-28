@@ -1,9 +1,11 @@
 import hashlib
 import os
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
-os.environ.setdefault("CHROMA_TELEMETRY_IMPL", "chromadb.telemetry.product.null.NullTelemetry")
+os.environ.setdefault(
+    "CHROMA_TELEMETRY_IMPL", "chromadb.telemetry.product.null.NullTelemetry"
+)
 
 try:
     import posthog
@@ -15,13 +17,14 @@ try:
 except Exception:
     pass
 
-from chromadb import PersistentClient
-from chromadb.config import Settings
-from sentence_transformers import SentenceTransformer
-from langchain_core.documents import Document
+# NOTE: env vars and the telemetry shim above must run before these imports.
+from chromadb import PersistentClient  # noqa: E402
+from chromadb.config import Settings  # noqa: E402
+from sentence_transformers import SentenceTransformer  # noqa: E402
+from langchain_core.documents import Document  # noqa: E402
 
-from org_vector.parse_org_files import OrgNode, OrgFile
-from org_vector.logger import get_logger
+from org_vector.parse_org_files import OrgNode, OrgFile  # noqa: E402
+from org_vector.logger import get_logger  # noqa: E402
 
 log = get_logger()
 
@@ -30,8 +33,8 @@ class VectorClient:
     def __init__(
         self,
         db_path: str,
-        model: Optional[Union[SentenceTransformer, str]] = None,
-        chroma_client: Optional[PersistentClient] = None,
+        model: Optional[Union[Any, str]] = None,
+        chroma_client: Optional[Any] = None,
         model_name: str = "all-MiniLM-L6-v2",
         collection_name: str = "org-roam",
         ingestion_instructions: Optional[str] = None,
@@ -43,7 +46,9 @@ class VectorClient:
         self.collection_name = collection_name
         default_ingestion, default_query = self._default_instructions(self.model_name)
         self.ingestion_instructions = (
-            ingestion_instructions if ingestion_instructions is not None else default_ingestion
+            ingestion_instructions
+            if ingestion_instructions is not None
+            else default_ingestion
         )
         self.query_instructions = (
             query_instructions if query_instructions is not None else default_query
@@ -124,14 +129,21 @@ class VectorClient:
                 metadata=metadata,
             )
         except TypeError:
-            self.collection = self.chroma_client.get_or_create_collection(name=self.collection_name)
+            self.collection = self.chroma_client.get_or_create_collection(
+                name=self.collection_name
+            )
 
     @staticmethod
     def _extract_dimension_from_metadata(metadata: Optional[dict]) -> Optional[int]:
         if not isinstance(metadata, dict):
             return None
 
-        for key in ("embedding_dimension", "dimension", "vector_dimension", "embedding_dim"):
+        for key in (
+            "embedding_dimension",
+            "dimension",
+            "vector_dimension",
+            "embedding_dim",
+        ):
             value = metadata.get(key)
             if value is None:
                 continue
@@ -162,7 +174,12 @@ class VectorClient:
             return None
 
         try:
-            result = self.collection.peek(limit=1, include=["embeddings"])
+            # `include` is supported at runtime but missing from some
+            # chromadb type stubs.
+            result = self.collection.peek(
+                limit=1,
+                include=["embeddings"],  # pyright: ignore[reportCallIssue]
+            )
         except Exception as error:
             log.warning(f"Could not read collection dimension: {error}")
             return None
@@ -190,7 +207,8 @@ class VectorClient:
             self.chroma_client.delete_collection(name=self.collection_name)
         except Exception as error:
             raise RuntimeError(
-                f"Could not reset collection '{self.collection_name}' to match model dimension {self.model_dimension}: {error}"
+                f"Could not reset collection '{self.collection_name}' to match "
+                f"model dimension {self.model_dimension}: {error}"
             ) from error
 
         self._get_or_create_collection()
@@ -203,7 +221,8 @@ class VectorClient:
             return
 
         log.warning(
-            "Collection '%s' dimension %s does not match model dimension %s; recreating collection.",
+            "Collection '%s' dimension %s does not match model dimension %s; "
+            "recreating collection.",
             self.collection_name,
             existing_dimension,
             self.model_dimension,
@@ -264,7 +283,9 @@ class VectorClient:
         return (str(stat.st_mtime_ns), int(stat.st_size))
 
     @staticmethod
-    def _metadata_to_source_state(metadata: Optional[dict]) -> Optional[Tuple[str, int]]:
+    def _metadata_to_source_state(
+        metadata: Optional[dict],
+    ) -> Optional[Tuple[str, int]]:
         if not metadata:
             return None
 
@@ -287,7 +308,10 @@ class VectorClient:
             log.warning(f"Could not read indexed file states: {error}")
             return states
 
-        for metadata in (results.get("metadatas") or []):
+        for raw_metadata in results.get("metadatas") or []:
+            metadata: Optional[dict] = (
+                raw_metadata if isinstance(raw_metadata, dict) else None
+            )
             if not metadata:
                 continue
 
@@ -304,7 +328,9 @@ class VectorClient:
 
         return states
 
-    def plan_sync(self, file_paths: List[str], remove_missing: bool = True) -> Dict[str, List[str]]:
+    def plan_sync(
+        self, file_paths: List[str], remove_missing: bool = True
+    ) -> Dict[str, List[str]]:
         current_files = sorted({path for path in file_paths if os.path.isfile(path)})
         indexed_states = self._get_indexed_file_states()
 
@@ -338,11 +364,15 @@ class VectorClient:
                 self.collection.delete(where={"filepath": file_path})
                 removed_count += 1
             except Exception as error:
-                log.warning(f"Could not remove indexed entries for {file_path}: {error}")
+                log.warning(
+                    f"Could not remove indexed entries for {file_path}: {error}"
+                )
 
         return removed_count
 
-    def sync_files(self, org_files: List[OrgFile], removed_files: Optional[List[str]] = None) -> Dict[str, int]:
+    def sync_files(
+        self, org_files: List[OrgFile], removed_files: Optional[List[str]] = None
+    ) -> Dict[str, int]:
         removed_count = self.remove_files(removed_files or [])
         indexed_count = 0
         failed_count = 0
@@ -374,7 +404,9 @@ class VectorClient:
                 suffix += 1
 
             if candidate != raw_id:
-                log.warning(f"Duplicate node id '{raw_id}' in {file_path}; using '{candidate}'")
+                log.warning(
+                    f"Duplicate node id '{raw_id}' in {file_path}; using '{candidate}'"
+                )
 
             used.add(candidate)
             unique_ids.append(candidate)
@@ -391,10 +423,10 @@ class VectorClient:
         all_nodes = org_file.get_all_nodes()
 
         for index, node in enumerate(all_nodes):
-            stars = '*' * max(1, node.level)
+            stars = "*" * max(1, node.level)
             path = node.get_path()
-            heading_line = node.outline.split('\n')[0] if node.outline else ""
-            if not heading_line.startswith('*'):
+            heading_line = node.outline.split("\n")[0] if node.outline else ""
+            if not heading_line.startswith("*"):
                 heading_line = f"{stars} {heading_line}"
 
             context = [
@@ -468,16 +500,20 @@ class VectorClient:
                 break
 
         return selected
-    
+
     def make_document(self, org_file: OrgFile) -> List[Document]:
         source_state = self._get_source_state(org_file.file_path)
-        documents, _ = self._build_documents_and_ids(org_file, source_state=source_state)
+        documents, _ = self._build_documents_and_ids(
+            org_file, source_state=source_state
+        )
         return documents
-    
+
     def embed_file(self, org_file: OrgFile) -> None:
         log.info(f"Embedding {org_file.title or 'file'}")
         source_state = self._get_source_state(org_file.file_path)
-        docs, node_ids = self._build_documents_and_ids(org_file, source_state=source_state)
+        docs, node_ids = self._build_documents_and_ids(
+            org_file, source_state=source_state
+        )
         if not docs:
             return
 
@@ -486,7 +522,9 @@ class VectorClient:
         try:
             self.collection.delete(where={"filepath": org_file.file_path})
         except Exception as delete_error:
-            log.warning(f"Could not clear prior embeddings for {org_file.file_path}: {delete_error}")
+            log.warning(
+                f"Could not clear prior embeddings for {org_file.file_path}: {delete_error}"
+            )
 
         def _upsert_batches() -> None:
             for start, end in self._iter_batch_ranges(len(docs), self.batch_size):
@@ -518,7 +556,8 @@ class VectorClient:
                 raise
 
             log.warning(
-                "Collection dimension mismatch while embedding %s; recreating collection and retrying.",
+                "Collection dimension mismatch while embedding %s; "
+                "recreating collection and retrying.",
                 org_file.file_path,
             )
             self._reset_collection(
@@ -526,41 +565,42 @@ class VectorClient:
             )
             _upsert_batches()
 
-    
     def query(self, query: str, k: int = 5) -> List[Document]:
         if not query.strip():
             return []
 
         log.info(f"Searching for {query}")
-        
+
         query_text = self._apply_instruction(self.query_instructions, query)
-            
+
         query_embedding = self.model.encode(query_text).tolist()
         n_candidates = max(k * 6, k)
-        
+
         results = self.collection.query(
             query_embeddings=[query_embedding],
             n_results=n_candidates,
-            include=["documents", "metadatas", "distances"]
+            include=["documents", "metadatas", "distances"],
         )
-        
+
         documents: List[Document] = []
-        if results and results['documents'] and results['metadatas']:
-            result_documents = results['documents'][0]
-            result_metadatas = results['metadatas'][0]
-            result_distances = results.get('distances', [[]])[0]
+        all_documents = results.get("documents") or []
+        all_metadatas = results.get("metadatas") or []
+        all_distances = (results.get("distances") or [[]])[0]
+
+        if all_documents and all_metadatas:
+            result_documents = all_documents[0]
+            result_metadatas = all_metadatas[0]
 
             for i in range(len(result_documents)):
-                metadata = dict(result_metadatas[i] or {})
-                if i < len(result_distances):
-                    metadata['distance'] = result_distances[i]
+                metadata: Dict[str, Any] = dict(result_metadatas[i] or {})
+                if i < len(all_distances):
+                    metadata["distance"] = all_distances[i]
 
                 documents.append(
                     Document(
                         page_content=result_documents[i],
-                        metadata=metadata
+                        metadata=metadata,
                     )
                 )
-        
+
         return self._diversify_documents(documents, k)
-    

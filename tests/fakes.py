@@ -47,7 +47,9 @@ class FakeCollection:
         return {"metadatas": metas}
 
     def peek(self, limit=1, include=None):
-        embeddings = [entry["embedding"] for entry in list(self.entries.values())[:limit]]
+        embeddings = [
+            entry["embedding"] for entry in list(self.entries.values())[:limit]
+        ]
         return {"embeddings": embeddings}
 
     def delete(self, where=None):
@@ -79,7 +81,9 @@ class FakeCollection:
             }
 
     def add(self, ids=None, embeddings=None, documents=None, metadatas=None):
-        self.upsert(ids=ids, embeddings=embeddings, documents=documents, metadatas=metadatas)
+        self.upsert(
+            ids=ids, embeddings=embeddings, documents=documents, metadatas=metadatas
+        )
 
     def query(self, query_embeddings=None, n_results=5, include=None):
         self.queries.append({"n_results": n_results, "include": list(include or [])})
@@ -116,8 +120,12 @@ class FakeChromaClient:
         self.deleted_collections.append(name)
 
 
-def make_vector_client(collection: Optional[FakeCollection] = None, model: Optional[FakeModel] = None,
-                       model_name: str = "all-MiniLM-L6-v2", **kwargs):
+def make_vector_client(
+    collection: Optional[FakeCollection] = None,
+    model: Optional[FakeModel] = None,
+    model_name: str = "all-MiniLM-L6-v2",
+    **kwargs
+):
     from org_vector.embeddings import VectorClient
 
     fake_model = model if model is not None else FakeModel()

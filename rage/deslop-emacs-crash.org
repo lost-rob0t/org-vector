@@ -1,0 +1,148 @@
+#+title: RAGE run — full de-slop redo + Emacs load/usage crash
+#+author: opencode (z-ai/glm-5.3-flash)
+
+* Run identity
+- Consumed issue :: user report: "full redo, gen by older LLMs; de-slop and improve; loading in emacs crashes the system"
+- Branch :: =rage/deslop-emacs-crash=
+- RAGE start commit :: =c82bd94dec20cb39bf1c2cbe585a153d468c23e9=
+
+* Evidence (start-commit reproduction)
+
+** E1 — gptel/sync query path always fails (REPRODUCED)
+=lisp/org-vector.el= =org-vector--query-sync= builds =… json … -k 5=, but
+=main.py= argparse has no =-k= option. Real output on start commit:
+
+: main.py: error: unrecognized arguments: -k 5
+
+Every =org-vector-gptel-query= and the gptel tool =org_vector_search= fail.
+
+** E2 — success reported as failure in =org-vector--query-sync=
+#+begin_src elisp
+(setq exit-code
+      (with-temp-buffer
+        (apply #'call-process (car command) nil t nil (cdr command))
+        (setq output (buffer-string))
+        (point)))          ; <-- exit-code is point, NOT call-process return
+#+end_src
+=exit-code= is the buffer point (>=1), so =(zerop exit-code)= is never true:
+the function always signals ="Query failed: …"= even when the CLI succeeds.
+It also creates a temp file that is never used.
+
+** E3 — missing =(require 'subr-x)= (the load/first-use "crash")
+Package-Requires declares =emacs "27.1"=. =when-let=, =string-trim=,
+=string-empty-p= live in =subr-x=, which is /not/ preloaded before Emacs 29.
+On 27/28 the first =org-vector-search= errors with =void-function when-let=
+(inside =org-vector--kill-process-if-live=) before any process starts; the
+results sentinel then also fails on =string-trim=, leaving the results buffer
+stuck at "Searching…". On Emacs 30 these are preloaded, which is why it only
+"sometimes" breaks. Byte-compile also flags =reference to free variable
+‘org-vector-menu’= and unused lexical var =err=.
+
+** E4 — CLI compat regression risk: none from fixes below
+=org-vector= resolves on PATH (nix profile) and the async search path works on
+Emacs 30; the crash is the combination of E1/E2/E3 plus a synchronous
+=call-process= that freezes the UI for the whole model load in the gptel path.
+
+** E5 — queries embedded with the WRONG instruction prefix
+=org_vector/embeddings.py:529=
+: query_text = self._apply_instruction(self.ingestion_instructions, query)
+should use =self.query_instructions=. Asymmetric instruction models (nomic/e5)
+retrieve with a passage prefix on queries — direct retrieval-quality bug.
+
+** E6 — deterministic fallback IDs never trigger (invariant #7 violated)
+=OrgNode.id= defaults to a fresh =uuid4()= on every parse. Proven:
+
+: deterministic across parses? False
+
+=_get_node_storage_id= checks =node.id= truthiness, so ID-less nodes get a
+/random/ storage id each re-index instead of the documented =auto-<sha1>=.
+
+** E7 — CLI logging flags are no-ops
+=get_logger()= runs at import time (module-level =log = get_logger()=) and
+binds handlers+level immediately; =configure_logging()= afterwards only sets
+env vars that are never read again. =--log-level INFO= does nothing.
+
+** E8 — slop inventory
+- flake.nix installs =ollama=, =langchain-ollama= (backend removed in c82bd94),
+  =adjusttext=, =matplotlib-inline=, =scikit-learn=, =pandas= (only used by a
+  dead =to_dataframe= nobody calls), =ipython=, =pip= in the runtime env.
+- setup.py: entry point =org_vector=org_vector.main:main= — module does not
+  exist; =psycopg=, =posthog= pins unused.
+- test_fixed.py imports =org_vector.parse_org_files_fixed= — file does not exist.
+- test.py / debug_duplicate_ids.py are ad-hoc REPL junk; project_analysis.md empty.
+- Three version numbers (el 0.4, flake 0.3.0, setup 0.1.0); URL placeholders.
+- README typos ("simularish") and an unimplemented promise (nomic/e5 defaults —
+  =_default_instructions= returns the same strings for every model).
+
+* Design (iteration 1)
+
+** Ownership / state boundaries
+- =org_vector/cli.py= owns argparse + dispatch; root =main.py= becomes a thin
+  shim calling =org_vector.cli.run()= (keeps =python main.py …= and the nix
+  wrapper working; fixes the setup.py entry point).
+- =VectorClient= keeps its public surface: =plan_sync=, =sync_files=,
+  =embed_file=, =make_document=, =query=, =remove_files=. Tests inject fake
+  model/chroma via the existing =model= and =chroma_client= params — no
+  network, no torch download in tests.
+- Elisp keeps the same interactive command names; only internals change.
+
+** Invariants to preserve (AGENTS.md)
+1. =query= == =search=, =update= == =embed= (single =MODE_ALIASES= map now).
+2. Incremental sync on (mtime_ns, size); unchanged skipped; deleted removed.
+3. Re-index replaces prior chunks (delete-by-filepath then upsert).
+4. Deterministic =auto-<sha1>= fallback IDs — now actually reachable.
+5. Retrieval diversifies: <=1 top hit per file before backfill.
+
+** Changes
+| File | Change |
+|---|---|
+| lisp/org-vector.el | =(require 'subr-x)=; fix exit-code capture; drop unused temp file; pass =-d= only for embed/serve; guard sentinel buffer liveness; autoload hygiene for transient; version 0.5.0 |
+| main.py | thin shim → =org_vector.cli= |
+| org_vector/cli.py | argparse (adds =-k/--results= for search/emacs/json, default 5), single alias map, unchanged mode/flag compat |
+| org_vector/embeddings.py | fix query instruction bug; implement model-specific default instructions (nomic-embed/e5/default) as README promises; tidy dead branches |
+| org_vector/parse_org_files.py | =OrgNode.id= default =""= (deterministic fallback real); drop pandas/to_dataframe; drop unused imports |
+| org_vector/logger.py | =configure_logging= actually reconfigures existing org_vector loggers/handlers; default file-log dir under =~/.cache/org-vector/logs= |
+| org_vector/background_service.py | no semantic change (already sound) |
+| setup.py | version 0.5.0; entry point =org_vector=org_vector.cli:run=; drop psycopg/posthog |
+| flake.nix | prune dead deps; runtime env minimal; version 0.5.0; fix homepage |
+| tests/ | new offline pytest suite (fake model/chroma) + ERT suite for elisp |
+| test_context_fix.py | rewritten as fast offline runner for the suite (keeps AGENTS single-test command) |
+| deleted | test.py, test_fixed.py, debug_duplicate_ids.py, load_config.py, project_analysis.md |
+| README.org | typos, =-k/--results= doc, note subr-x/Emacs 27 caveat, org-vector.el usage |
+
+** Rejected alternatives
+- Moving the CLI out of =main.py= entirely: breaks =python main.py= and the
+  nix wrapper; shim keeps both.
+- Making gptel query async: gptel tool functions must return values
+  synchronously; async would change the tool contract. Kept sync, documented.
+- Deleting =to_dataframe=: no caller in repo or CLI; pandas out of the core
+  dependency path. (Recoverable from git history.)
+- Auto-recreating collection on every mismatch: kept the existing guard +
+  retry-on-mismatch behavior as-is (tested via fake client).
+
+** Failure/recovery behavior
+- =sync_files= logs per-file failures and continues (unchanged).
+- Collection dimension mismatch during embed: reset + retry once (unchanged).
+- Elisp: dead process-buffer sentinel must not error; failed CLI runs render
+  the error output in the results buffer (unchanged behavior, fixed plumbing).
+
+** Acceptance criteria → tests
+| # | Criterion | Test |
+|---|---|---|
+| A1 | elisp loads + provides on clean batch emacs | ERT =org-vector-loads= |
+| A2 | =-k= accepted by CLI; search/emacs/json honor it | =test_cli_accepts_results_flag= |
+| A3 | query-sync returns parsed JSON on exit 0; signals on failure | ERT with stub executable |
+| A4 | fallback IDs deterministic across parses | =test_fallback_ids_deterministic= |
+| A5 | query embeddings use query_instructions | =test_query_uses_query_instructions= |
+| A6 | nomic/e5/default instruction defaults | =test_default_instructions_by_model= |
+| A7 | =configure_logging= takes effect post-import | =test_configure_logging_reconfigures= |
+| A8 | nested-content parse regression (5 nodes) | =test_nested_content_embedding= |
+| A9 | incremental plan_sync (unchanged/changed/removed) | =test_plan_sync_states= |
+| A10 | diversification ≤1 per file | =test_diversify_caps_per_file= |
+| A11 | full gates: py_compile, pyright, black --check, flake8, ERT batch | exact-head run log below |
+
+* TDD log
+(see commits on =rage/deslop-emacs-crash=; red→green evidence per test)
+
+* Exact-head gate
+(pending)

@@ -76,11 +76,9 @@ nix develop -c flake8 main.py org_vector
 ```
 
 ### Test scripts (current test style)
-Tests are script-oriented and integration-heavy, not a strict pytest suite.
+Tests are offline and deterministic (fake model + fake vector store; no downloads):
 ```bash
 nix develop -c python test_context_fix.py
-nix develop -c python test_fixed.py
-nix develop -c python test.py
 ```
 
 ### Single test execution (important)
@@ -88,9 +86,14 @@ Preferred single-test command:
 ```bash
 nix develop -c python test_context_fix.py
 ```
-Single function invocation:
+Single test case:
 ```bash
-nix develop -c python -c "from test_context_fix import test_nested_content_embedding as t; raise SystemExit(0 if t() else 1)"
+nix develop -c python -m unittest tests.test_org_vector.InstructionTests.test_query_uses_query_instructions
+```
+
+### Emacs lisp tests
+```bash
+emacs --batch -l tests/org-vector-test.el -f ert-run-tests-batch-and-exit
 ```
 
 ### CLI smoke checks

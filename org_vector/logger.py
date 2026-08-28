@@ -36,12 +36,17 @@ def should_log_to_file() -> bool:
 def get_log_file_path() -> Path:
     """Log file location from VECTOR_ORG_LOG_DIR, defaulting to the user cache."""
     log_dir_str = os.getenv(ENV_LOG_DIR, "")
-    log_dir = Path(log_dir_str) if log_dir_str else Path("~/.cache/org-vector/logs").expanduser()
+    log_dir = (
+        Path(log_dir_str)
+        if log_dir_str
+        else Path("~/.cache/org-vector/logs").expanduser()
+    )
     log_dir.mkdir(parents=True, exist_ok=True)
     return log_dir / "vectored_notes.log"
 
 
 _console_handler: Optional[logging.Handler] = None
+_file_handlers: dict = {}
 
 
 def _get_console_handler() -> logging.Handler:
@@ -54,30 +59,32 @@ def _get_console_handler() -> logging.Handler:
 
 
 def _attach_file_handler(logger: logging.Logger) -> None:
-    if getattr(logger, "_org_vector_file_handler", None) is not None:
+    if logger.name in _file_handlers:
         return
     try:
         file_handler = logging.FileHandler(get_log_file_path(), mode="a")
         file_handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=DATE_FORMAT))
         logger.addHandler(file_handler)
-        logger._org_vector_file_handler = file_handler
+        _file_handlers[logger.name] = file_handler
     except Exception as error:
         logger.error("Failed to setup file logging: %s", error)
 
 
 def _apply_config(logger: logging.Logger, level: Optional[int]) -> None:
     logger.setLevel(level if level is not None else get_log_level_from_env())
+    file_handler = _file_handlers.get(logger.name)
     if should_log_to_file():
-        _attach_file_handler(logger)
-    else:
-        file_handler = getattr(logger, "_org_vector_file_handler", None)
-        if file_handler is not None:
-            logger.removeHandler(file_handler)
-            file_handler.close()
-            logger._org_vector_file_handler = None
+        if file_handler is None:
+            _attach_file_handler(logger)
+    elif file_handler is not None:
+        logger.removeHandler(file_handler)
+        file_handler.close()
+        del _file_handlers[logger.name]
 
 
-def get_logger(name: Optional[str] = None, level: Optional[int] = None) -> logging.Logger:
+def get_logger(
+    name: Optional[str] = None, level: Optional[int] = None
+) -> logging.Logger:
     """Return a configured logger under the 'org_vector' namespace.
 
     Configuration via environment variables:
