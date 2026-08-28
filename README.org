@@ -1,5 +1,7 @@
 #+title: Vector Notes
 
+[[https://github.com/lost-rob0t/org-vector/actions/workflows/ci.yml][https://github.com/lost-rob0t/org-vector/actions/workflows/ci.yml/badge.svg]]
+
 * Vector search your notes for similar headings in org-roam.
 
 ** Embedding Defaults
