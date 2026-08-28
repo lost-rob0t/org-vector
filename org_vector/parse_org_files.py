@@ -1,25 +1,27 @@
-from orgparse import load
-import traceback
-import pandas as pd
-from typing import List, Optional, Tuple
 import os
-from glob import glob
 import re
-import uuid as u
-from dataclasses import dataclass, field, asdict
+import uuid
+from dataclasses import dataclass, field
+from glob import glob
+from typing import List, Optional
 
 from org_vector.logger import get_logger
 
-log = get_logger()
+log = get_logger(__name__)
+
+_TITLE_PATTERN = re.compile(r"^#\+title:\s*(.*)$", re.IGNORECASE)
+
 
 @dataclass
 class OrgNode:
     outline: str
     body: str
-    tags: list = field(default_factory=lambda: list())
-    id: str = field(default_factory=lambda: str(u.uuid4()))
-    children: List['OrgNode'] = field(default_factory=list)
-    parent: Optional['OrgNode'] = field(default=None, repr=False)
+    tags: List[str] = field(default_factory=list)
+    # Empty unless the org file declares an :ID: property. Deterministic
+    # fallback storage ids are derived at indexing time (see embeddings).
+    id: str = ""
+    children: List["OrgNode"] = field(default_factory=list)
+    parent: Optional["OrgNode"] = field(default=None, repr=False)
     level: int = 0
 
     def __hash__(self):
@@ -27,93 +29,82 @@ class OrgNode:
 
     def __eq__(self, other):
         if not isinstance(other, OrgNode):
-            return False
+            return NotImplemented
         return self.id == other.id
-    
-    def add_child(self, child: 'OrgNode'):
+
+    def add_child(self, child: "OrgNode") -> None:
         """Add a child node and set its parent reference."""
         child.parent = self
         child.level = self.level + 1
         self.children.append(child)
-    
-    def get_all_descendants(self) -> List['OrgNode']:
+
+    def get_all_descendants(self) -> List["OrgNode"]:
         """Get all descendant nodes in a flat list (depth-first traversal)."""
-        descendants = []
+        descendants: List[OrgNode] = []
         for child in self.children:
             descendants.append(child)
             descendants.extend(child.get_all_descendants())
         return descendants
-    
-    def get_ancestors(self) -> List['OrgNode']:
+
+    def get_ancestors(self) -> List["OrgNode"]:
         """Get all ancestor nodes from parent to root."""
-        ancestors = []
+        ancestors: List[OrgNode] = []
         current = self.parent
         while current:
             ancestors.append(current)
             current = current.parent
         return ancestors
-    
+
     def get_path(self) -> str:
-        """Get the hierarchical path to this node."""
+        """Get the hierarchical heading path to this node."""
         ancestors = self.get_ancestors()
         ancestors.reverse()
-        path_parts = [node.outline.split('\n')[0].strip() for node in ancestors]
-        path_parts.append(self.outline.split('\n')[0].strip())
-        return ' > '.join(path_parts)
-    
-    def to_dataframe(self) -> pd.DataFrame:
-        """Convert node to dataframe row, including hierarchy info."""
-        data = asdict(self)
-        data['children'] = len(self.children)
-        data['parent_id'] = self.parent.id if self.parent else None
-        data['path'] = self.get_path()
-        return pd.DataFrame([data])
+        parts = [node.heading_text() for node in ancestors]
+        parts.append(self.heading_text())
+        return " > ".join(parts)
+
+    def heading_text(self) -> str:
+        """First line of the outline, i.e. the heading itself."""
+        return self.outline.split("\n")[0].strip() if self.outline else ""
+
 
 @dataclass
 class OrgFile:
-    id: str = field(default_factory=lambda: str(u.uuid4()))
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
     file_path: str = ""
     title: str = ""
     body: List[OrgNode] = field(default_factory=list)
 
     def get_all_nodes(self) -> List[OrgNode]:
         """Get all nodes in the file as a flat list."""
-        all_nodes = []
+        all_nodes: List[OrgNode] = []
         for node in self.body:
             all_nodes.append(node)
             all_nodes.extend(node.get_all_descendants())
         return all_nodes
-
-    def to_dataframe(self) -> pd.DataFrame:
-        all_nodes = self.get_all_nodes()
-        if not all_nodes:
-            return pd.DataFrame()
-
-        df_list = [node.to_dataframe() for node in all_nodes]
-        return pd.concat(df_list, ignore_index=True)
 
     def __hash__(self):
         return hash(self.id)
 
     def __eq__(self, other):
         if not isinstance(other, OrgFile):
-            return False
-        return self.id == other.id and self.title == other.title
+            return NotImplemented
+        return self.file_path == other.file_path
+
 
 class OrgRoam:
-    def __init__(self, path: str, banned_files: set | None = None):
+    def __init__(self, path: str, banned_files: Optional[set] = None):
         self.path = path
         self.banned_files = banned_files or set()
 
     def get_files(self, get_full: bool = False) -> List[str]:
         expanded_path = os.path.expanduser(self.path)
-        path = os.path.join(expanded_path, "**", "*.org")
-        matched_paths = glob(path, recursive=True)
+        matched_paths = glob(os.path.join(expanded_path, "**", "*.org"), recursive=True)
         files = sorted(file_path for file_path in matched_paths if os.path.isfile(file_path))
 
         skipped = len(matched_paths) - len(files)
         if skipped:
-            log.warning(f"Skipped {skipped} non-file .org path(s) under {expanded_path}")
+            log.warning("Skipped %d non-file .org path(s) under %s", skipped, expanded_path)
 
         if not get_full:
             note_titles = sorted({os.path.splitext(os.path.basename(file))[0] for file in files})
@@ -121,108 +112,103 @@ class OrgRoam:
 
         return files
 
-    def get_id(self, node):
-        return node.properties.get('ID')
-    
-    def get_title(self, node):
-        "Gets the title of the org heading"
+    @staticmethod
+    def get_id(node) -> Optional[str]:
+        node_id = node.properties.get("ID")
+        return str(node_id).strip() if node_id else None
+
+    @staticmethod
+    def get_title(node) -> str:
+        """Gets the title of the org heading (or the #+TITLE of a file root)."""
         if node.heading:
             return node.heading
-        else:
-            title_pattern = re.compile(r'^#\+title:\s*(.*)$', re.IGNORECASE)
-            match = title_pattern.search(node.body)
-            if match:
-                return match.group(1)
-            else:
-                return re.sub(r"#\+title:", "", node.body.split("\n")[0], flags=re.IGNORECASE).strip()
 
-    def get_node_body(self, node) -> str:
+        match = _TITLE_PATTERN.search(node.body or "")
+        if match:
+            return match.group(1).strip()
+
+        first_line = (node.body or "").split("\n")[0]
+        return _TITLE_PATTERN.sub("", first_line, count=1).strip()
+
+    @staticmethod
+    def get_node_body(node) -> str:
         return node.body.strip()
 
     def parse_node_recursive(self, orgparse_node, level: int = 1) -> OrgNode:
-        """
-        Parse an orgparse node into our OrgNode structure recursively.
-        Maintains proper parent-child relationships.
-        """
-        node_text = str(orgparse_node)
-        body = self.get_node_body(orgparse_node)
+        """Parse an orgparse node into an OrgNode, keeping parent-child links."""
         org_node = OrgNode(
-            outline=node_text,
-            body=body,
-            level=level
+            outline=str(orgparse_node),
+            body=self.get_node_body(orgparse_node),
+            level=level,
         )
 
         node_id = self.get_id(orgparse_node)
         if node_id:
             org_node.id = node_id
 
-        if hasattr(orgparse_node, 'tags'):
-            org_node.tags = orgparse_node.tags or []
+        if hasattr(orgparse_node, "tags"):
+            org_node.tags = list(orgparse_node.tags or [])
 
         for child in orgparse_node.children:
             try:
-                child_node = self.parse_node_recursive(child, level + 1)
-                org_node.add_child(child_node)
-            except Exception as e:
-                log.error(f"Error parsing child node: {e}")
+                org_node.add_child(self.parse_node_recursive(child, level + 1))
+            except Exception as error:
+                log.error("Error parsing child node in %s: %s", org_node.heading_text(), error)
 
         return org_node
 
-    def parse_org(self, root) -> Optional[Tuple[str, List[OrgNode]]]:
-        """Parse the org file, returns title and list of top-level nodes."""
+    def parse_org(self, root) -> Optional[tuple]:
+        """Parse an orgparse root; returns (title, top-level nodes)."""
         try:
             heading = self.get_title(root)
-            org_id = self.get_id(root)
-
-            top_level_nodes = []
+            top_level_nodes: List[OrgNode] = []
 
             for child in root.children:
-                if child:
-                    try:
-                        node = self.parse_node_recursive(child, level=1)
-                        top_level_nodes.append(node)
-                    except Exception as e:
-                        log.error(f"Error parsing top-level node: {e}")
+                try:
+                    top_level_nodes.append(self.parse_node_recursive(child, level=1))
+                except Exception as error:
+                    log.error("Error parsing top-level node: %s", error)
 
-            return (heading, top_level_nodes)
-        except Exception as e:
-            log.error(f"Error while parsing org file: {e}\n{traceback.format_exc()}")
+            return heading, top_level_nodes
+        except Exception as error:
+            log.error("Error while parsing org file: %s", error, exc_info=True)
+            return None
 
     def parse_file(self, file_path: str) -> Optional[OrgFile]:
         if not os.path.isfile(file_path):
-            log.warning(f"Skipping non-file org path: {file_path}")
+            log.warning("Skipping non-file org path: %s", file_path)
             return None
 
         try:
-            log.info(f"parsing: {file_path}")
-            root = load(file_path)
+            log.info("parsing: %s", file_path)
+            root = orgparse_load(file_path)
             parsed = self.parse_org(root)
             if not parsed:
-                log.warning(f"Could not parse org file: {file_path}")
+                log.warning("Could not parse org file: %s", file_path)
                 return None
 
             title, nodes = parsed
+            org_file = OrgFile(file_path=file_path, body=nodes, title=title)
             org_id = self.get_id(root)
-            parsed_org = OrgFile(
-                file_path=file_path,
-                body=nodes,
-                title=title
-            )
             if org_id:
-                parsed_org.id = org_id
-            return parsed_org
-        except Exception as e:
-            log.error(f"Error processing file {file_path}: {e}")
+                org_file.id = org_id
+            return org_file
+        except Exception as error:
+            log.error("Error processing file %s: %s", file_path, error)
             return None
 
     def parse_files(self, file_paths: Optional[List[str]] = None) -> List[OrgFile]:
-        """Parse org files and return a list of OrgFile objects with tree structure."""
-        files = []
+        """Parse org files into a list of OrgFile objects with tree structure."""
         paths = file_paths if file_paths is not None else self.get_files(get_full=True)
-
+        parsed_files = []
         for file_path in paths:
             parsed = self.parse_file(file_path)
             if parsed is not None:
-                files.append(parsed)
+                parsed_files.append(parsed)
+        return parsed_files
 
-        return files
+
+def orgparse_load(file_path: str):
+    import orgparse
+
+    return orgparse.load(file_path)

@@ -72,8 +72,10 @@ class VectorClient:
     def _load_model(
         model: Optional[Union[SentenceTransformer, str]],
         model_name: str,
-    ) -> SentenceTransformer:
-        if isinstance(model, SentenceTransformer):
+    ):
+        # Duck-typed encoders (anything with .encode) are accepted so callers
+        # and tests can inject alternatives without a model download.
+        if model is not None and not isinstance(model, str):
             return model
         if isinstance(model, str):
             return SentenceTransformer(model)
@@ -210,6 +212,11 @@ class VectorClient:
 
     @staticmethod
     def _default_instructions(model_name: str) -> Tuple[str, str]:
+        lowered = model_name.lower()
+        if "nomic-embed" in lowered:
+            return ("search_document: ", "search_query: ")
+        if "e5" in lowered:
+            return ("passage: ", "query: ")
         return (
             "Represent this org note for semantic retrieval:",
             "Represent this search query for retrieving relevant org notes:",
@@ -526,7 +533,7 @@ class VectorClient:
 
         log.info(f"Searching for {query}")
         
-        query_text = self._apply_instruction(self.ingestion_instructions, query)
+        query_text = self._apply_instruction(self.query_instructions, query)
             
         query_embedding = self.model.encode(query_text).tolist()
         n_candidates = max(k * 6, k)

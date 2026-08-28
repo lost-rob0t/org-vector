@@ -1,97 +1,122 @@
 import logging
-import sys
 import os
+import sys
 from pathlib import Path
 from typing import Optional
 
+ENV_LOG_LEVEL = "VECTOR_ORG_LOG_LEVEL"
+ENV_LOG_TO_FILE = "VECTOR_ORG_LOG_TO_FILE"
+ENV_LOG_DIR = "VECTOR_ORG_LOG_DIR"
+
+LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+_LEVEL_MAP = {
+    "DEBUG": logging.DEBUG,
+    "INFO": logging.INFO,
+    "WARNING": logging.WARNING,
+    "WARN": logging.WARNING,
+    "ERROR": logging.ERROR,
+    "CRITICAL": logging.CRITICAL,
+    "FATAL": logging.CRITICAL,
+}
+
+
 def get_log_level_from_env() -> int:
-    """Get log level from environment variable or return default ERROR level."""
-    level_str = os.getenv('VECTOR_ORG_LOG_LEVEL', 'ERROR').upper()
-    level_mapping = {
-        'DEBUG': logging.DEBUG,
-        'INFO': logging.INFO,
-        'WARNING': logging.WARNING,
-        'WARN': logging.WARNING,
-        'ERROR': logging.ERROR,
-        'CRITICAL': logging.CRITICAL,
-        'FATAL': logging.CRITICAL
-    }
-    return level_mapping.get(level_str, logging.ERROR)
+    """Log level from VECTOR_ORG_LOG_LEVEL, defaulting to ERROR."""
+    level_str = os.getenv(ENV_LOG_LEVEL, "ERROR").upper()
+    return _LEVEL_MAP.get(level_str, logging.ERROR)
+
 
 def should_log_to_file() -> bool:
-    """Check if file logging is enabled via environment variable."""
-    return os.getenv('VECTOR_ORG_LOG_TO_FILE', 'false').lower() in ('true', '1', 'yes', 'on')
+    """Whether VECTOR_ORG_LOG_TO_FILE enables file logging."""
+    return os.getenv(ENV_LOG_TO_FILE, "false").lower() in ("true", "1", "yes", "on")
+
 
 def get_log_file_path() -> Path:
-    """Get log file path from environment or use default."""
-    log_dir_str = os.getenv('VECTOR_ORG_LOG_DIR', '')
-    if log_dir_str:
-        log_dir = Path(log_dir_str)
-    else:
-        log_dir = Path(__file__).resolve().parent / "logs"
-    
-    log_dir.mkdir(exist_ok=True)
+    """Log file location from VECTOR_ORG_LOG_DIR, defaulting to the user cache."""
+    log_dir_str = os.getenv(ENV_LOG_DIR, "")
+    log_dir = Path(log_dir_str) if log_dir_str else Path("~/.cache/org-vector/logs").expanduser()
+    log_dir.mkdir(parents=True, exist_ok=True)
     return log_dir / "vectored_notes.log"
 
+
+_console_handler: Optional[logging.Handler] = None
+
+
+def _get_console_handler() -> logging.Handler:
+    global _console_handler
+    if _console_handler is None:
+        handler = logging.StreamHandler(sys.stderr)
+        handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=DATE_FORMAT))
+        _console_handler = handler
+    return _console_handler
+
+
+def _attach_file_handler(logger: logging.Logger) -> None:
+    if getattr(logger, "_org_vector_file_handler", None) is not None:
+        return
+    try:
+        file_handler = logging.FileHandler(get_log_file_path(), mode="a")
+        file_handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=DATE_FORMAT))
+        logger.addHandler(file_handler)
+        logger._org_vector_file_handler = file_handler
+    except Exception as error:
+        logger.error("Failed to setup file logging: %s", error)
+
+
+def _apply_config(logger: logging.Logger, level: Optional[int]) -> None:
+    logger.setLevel(level if level is not None else get_log_level_from_env())
+    if should_log_to_file():
+        _attach_file_handler(logger)
+    else:
+        file_handler = getattr(logger, "_org_vector_file_handler", None)
+        if file_handler is not None:
+            logger.removeHandler(file_handler)
+            file_handler.close()
+            logger._org_vector_file_handler = None
+
+
 def get_logger(name: Optional[str] = None, level: Optional[int] = None) -> logging.Logger:
-    """
-    Return a configured logger for the project.
-    
+    """Return a configured logger under the 'org_vector' namespace.
+
     Configuration via environment variables:
     - VECTOR_ORG_LOG_LEVEL: DEBUG, INFO, WARNING, ERROR, CRITICAL (default: ERROR)
     - VECTOR_ORG_LOG_TO_FILE: true/false (default: false)
     - VECTOR_ORG_LOG_DIR: custom log directory path (optional)
-    
-    Args:
-        name: Logger name (defaults to caller's module name)
-        level: Override log level (optional)
     """
-    logger_name = name or __name__
+    logger_name = name or "org_vector"
+    if not logger_name.startswith("org_vector"):
+        logger_name = f"org_vector.{logger_name}"
+
     logger = logging.getLogger(logger_name)
-    
-    if logger.handlers:
-        return logger  # already configured
+    if not logger.handlers:
+        logger.addHandler(_get_console_handler())
+        logger.propagate = False
 
-    # Use provided level or get from environment (default: ERROR)
-    log_level = level if level is not None else get_log_level_from_env()
-    logger.setLevel(log_level)
-
-    # Log format
-    fmt = logging.Formatter(
-        "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S"
-    )
-
-    # Console handler - always enabled for errors and above
-    console = logging.StreamHandler(sys.stderr)
-    console.setFormatter(fmt)
-    logger.addHandler(console)
-
-    # File handler - only if enabled
-    if should_log_to_file():
-        try:
-            log_file = get_log_file_path()
-            file_handler = logging.FileHandler(log_file, mode="a")
-            file_handler.setFormatter(fmt)
-            logger.addHandler(file_handler)
-        except Exception as e:
-            # If file logging fails, at least log the error to console
-            logger.error(f"Failed to setup file logging: {e}")
-
+    _apply_config(logger, level)
     return logger
 
-def configure_logging(level: Optional[str] = None, log_to_file: Optional[bool] = None, log_dir: Optional[str] = None):
-    """
-    Programmatically configure logging settings.
-    
-    Args:
-        level: Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-        log_to_file: Enable/disable file logging
-        log_dir: Custom log directory path
+
+def configure_logging(
+    level: Optional[str] = None,
+    log_to_file: Optional[bool] = None,
+    log_dir: Optional[str] = None,
+) -> None:
+    """(Re)configure all org_vector loggers, including ones created earlier.
+
+    Safe to call at any time: loggers created before this call are updated in
+    place, so CLI flags take effect even though modules create loggers at
+    import time.
     """
     if level:
-        os.environ['VECTOR_ORG_LOG_LEVEL'] = level.upper()
+        os.environ[ENV_LOG_LEVEL] = level.upper()
     if log_to_file is not None:
-        os.environ['VECTOR_ORG_LOG_TO_FILE'] = str(log_to_file).lower()
+        os.environ[ENV_LOG_TO_FILE] = str(log_to_file).lower()
     if log_dir:
-        os.environ['VECTOR_ORG_LOG_DIR'] = log_dir
+        os.environ[ENV_LOG_DIR] = log_dir
+
+    resolved_level = _LEVEL_MAP.get(level.upper()) if level else None
+    for logger_name in list(logging.root.manager.loggerDict):
+        if logger_name.startswith("org_vector"):
+            _apply_config(logging.getLogger(logger_name), resolved_level)
