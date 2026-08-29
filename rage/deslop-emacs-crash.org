@@ -177,5 +177,7 @@ Head: =3562b57558e64315a94a782ad70f60e998ea9820=
 | =nix run .# -- query --path ~/.cache/org-vector/ --query "Python code" -k 2= | PASS (2 results, real DB) |
 | =nix run .# -- embed --path ~/.cache/org-vector/= | PASS (errors correctly: --dir required) |
 
-Merge state: branch =rage/deslop-emacs-crash= left unmerged for user
-comparison against =master=. No GitHub CI configured in this repo.
+Merge state: MERGED as PR #1 (https://github.com/lost-rob0t/org-vector/pull/1)
+with green exact-head CI (checks + build jobs). Merge SHA:
+=6be815e= (=Merge pull request #1 from lost-rob0t/rage-deslop-emacs-crash=).
+Consumed issue satisfied: full de-slop redo + Emacs load/usage crash fixed.
