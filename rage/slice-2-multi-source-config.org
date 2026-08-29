@@ -1,0 +1,97 @@
+#+title: ARADR slice 2 — multi-source configuration and discovery
+#+startup: overview
+
+* Identity
+- Parent epic :: #2
+- Slice issue :: #4
+- Mode :: AUTO RAGE
+- Human gate :: disabled
+- Depends on :: #3 canonical source/document model
+
+* Problem
+The current configuration assumes one Org directory and the current discovery path is coupled to Org-oriented behavior. v2 needs a generic source layer that can enumerate arbitrary configured corpora without pulling in embedding, vector-store, MCP, gptel, or LLM dependencies.
+
+* Design direction
+** Global config
+Global index defaults own backend/model/index path and defaults inherited by sources.
+
+** Named sources
+A source has:
+- stable unique =name=
+- one or more =paths=
+- recursive flag
+- include/exclude globs evaluated relative to each root
+- collection/namespace
+- parser/chunker hints
+- model override
+- granularity
+- watch policy
+- metadata tags
+- explicit symlink policy
+
+Duplicate source names are configuration errors.
+
+** Discovery result
+Discovery returns typed candidates carrying:
+- canonical source reference from #3
+- root path
+- normalized absolute file path
+- root-relative path
+- collection
+- parser/chunker hints
+- granularity
+- source metadata
+
+Discovery must be deterministic: sources ordered by configured source name/order policy and candidates sorted by normalized relative path before emission unless a streaming interface explicitly documents stable traversal ordering.
+
+** Glob semantics
+Includes and excludes are matched against POSIX-style paths relative to each source root. Excludes win. Directories are traversal inputs only and never emitted as file candidates.
+
+** Symlinks
+Default: do not recursively follow directory symlinks. File symlinks are excluded by default unless the source explicitly enables them. Any future follow mode must detect traversal cycles.
+
+** Overlapping roots
+Deduplicate files by canonical normalized resolved identity within one discovery run while retaining the first deterministic source/root ownership. A later design may allow intentional multi-collection duplication via an explicit option; it must never happen accidentally.
+
+** Failure model
+One missing/unreadable root produces a structured diagnostic associated with the source/root. Other valid sources continue. Configuration syntax/schema errors fail config loading because their meaning is undefined.
+
+** Legacy compatibility
+Translate legacy =[service] dir=...= into one synthetic named source, initially =legacy-org=, with Org include behavior and existing service defaults. The translation exists at the config boundary; downstream code only sees the new source model.
+
+* RED contract
+Use temporary directories only.
+
+1. notes root contains Org/Markdown/text fixtures plus excluded archive and =.git= paths.
+2. code root contains source files plus excluded =node_modules= or similar subtree.
+3. a missing root is configured as a third source.
+4. config loads all three.
+5. discovery returns only matching regular files from valid roots.
+6. every candidate preserves source identity, normalized path, relative path, collection, parser, and granularity.
+7. results remain byte-for-byte/order stable across repeated discovery.
+8. missing root yields a structured diagnostic without losing valid candidates.
+9. duplicate source names fail validation.
+10. legacy =[service] dir=...= translates into one valid source.
+
+Current master should fail because this multi-source typed contract is absent. That is the intended RED.
+
+* Implementation boundary
+Likely modules, subject to #3 API:
+- =org_vector.config= or extension of =service_config=
+- =org_vector.sources=
+
+Do not put parser execution, embedding, backend writes, Tree-sitter, QA, MCP, or Emacs code into this slice.
+
+* Acceptance
+- deterministic offline RED then GREEN
+- compatibility with current service config
+- no new heavy runtime dependency
+- existing tests green
+- py_compile / pyright / black / flake8 / nix build gates
+- exact-head evidence recorded here after implementation
+
+* Progress
+- Design :: MATERIALIZED
+- RED :: READY
+- Human approval :: NOT REQUIRED
+- Next action :: execute RED against implementation branch after consuming #3 canonical types
