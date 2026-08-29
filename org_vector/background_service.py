@@ -99,7 +99,10 @@ class BackgroundIndexerService:
             ):
                 return True
 
-        if self._flags.DELETE_SELF in event_flags or self._flags.MOVE_SELF in event_flags:
+        if (
+            self._flags.DELETE_SELF in event_flags
+            or self._flags.MOVE_SELF in event_flags
+        ):
             return True
 
         return False
@@ -115,7 +118,9 @@ class BackgroundIndexerService:
         self._dir_to_wd[directory] = wd
 
     def _remove_stale_watches(self) -> None:
-        stale_directories = [directory for directory in self._dir_to_wd if not os.path.isdir(directory)]
+        stale_directories = [
+            directory for directory in self._dir_to_wd if not os.path.isdir(directory)
+        ]
         for directory in stale_directories:
             wd = self._dir_to_wd.pop(directory)
             self._wd_to_dir.pop(wd, None)
@@ -138,7 +143,9 @@ class BackgroundIndexerService:
         sync_plan = self.vector_client.plan_sync(file_paths)
 
         files_to_index = sync_plan["to_index"]
-        parsed_files = self.roam.parse_files(file_paths=files_to_index) if files_to_index else []
+        parsed_files = (
+            self.roam.parse_files(file_paths=files_to_index) if files_to_index else []
+        )
         sync_stats = self.vector_client.sync_files(
             parsed_files,
             removed_files=sync_plan["to_remove"],
@@ -186,7 +193,9 @@ class BackgroundIndexerService:
             while not self._stop_requested:
                 timeout_ms = self.config.poll_timeout_ms
                 if self._sync_window.pending and self._sync_window.deadline is not None:
-                    remaining_ms = int(max((self._sync_window.deadline - time.monotonic()) * 1000, 0))
+                    remaining_ms = int(
+                        max((self._sync_window.deadline - time.monotonic()) * 1000, 0)
+                    )
                     timeout_ms = min(timeout_ms, remaining_ms)
 
                 try:
@@ -198,7 +207,11 @@ class BackgroundIndexerService:
                         event_flags = set(self._flags.from_mask(event.mask))
                         watched_dir = self._wd_to_dir.get(event.wd, self.roam_dir)
                         file_name = event.name or ""
-                        file_path = os.path.join(watched_dir, file_name) if file_name else watched_dir
+                        file_path = (
+                            os.path.join(watched_dir, file_name)
+                            if file_name
+                            else watched_dir
+                        )
 
                         if self._is_relevant_event(event_flags, file_path):
                             self._schedule_sync()

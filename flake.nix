@@ -10,30 +10,22 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        # Use Python 3.12 for better compatibility with current packages
-        pythonEnv = pkgs.python312.withPackages (ps: with ps; [
-          adjusttext
+        python = pkgs.python312;
+        runtimeDeps = ps: with ps; [
           langchain
           orgparse
-          matplotlib-inline
           numpy
-          pandas
           sentence-transformers
-          scikit-learn
-          ollama
           chromadb
           ps."inotify-simple"
-          langchain-chroma
-          langchain-ollama
-          # Additional commonly needed packages
-          pip
-          ipython
-        ]);
+        ];
+
+        pythonEnv = python.withPackages runtimeDeps;
 
         # Create the main package
         org-vector = pkgs.stdenv.mkDerivation {
           pname = "org-vector";
-          version = "0.3.0";
+          version = "0.5.0";
 
           src = ./.;
 
@@ -80,7 +72,7 @@
 
           meta = with pkgs.lib; {
             description = "Semantic vector search for Org-roam note collections";
-            homepage = "https://github.com/yourusername/org-vector";
+            homepage = "https://github.com/lost-rob0t/org-vector";
             license = licenses.mit;
             maintainers = [ ];
             platforms = platforms.unix;
@@ -106,8 +98,15 @@
         # Development shell
         devShells.default = pkgs.mkShell {
           buildInputs = [
-            pythonEnv
+            (python.withPackages (ps: runtimeDeps ps ++ (with ps; [
+              pip
+              ipython
+              pytest
+              black
+              flake8
+            ])))
             pkgs.pyright
+            pkgs.emacs
           ];
 
           shellHook = ''
@@ -117,10 +116,8 @@
             echo "Available commands:"
             echo "  python main.py embed -d <dir>    # Index org files"
             echo "  python main.py search -q <query> # Search indexed files"
-            echo "  python test_context_fix.py       # Run tests"
-            echo ""
-            echo "Installed packages:"
-            pip list | grep -E "adjustText|langchain|openai|orgparse|matplotlib-inline|numpy|pandas|sentence-transformers|scikit-learn|chromadb"
+            echo "  python test_context_fix.py       # Run offline test suite"
+            echo "  emacs --batch -l tests/org-vector-test.el -f ert-run-tests-batch-and-exit"
           '';
         };
       }

@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  checks:
+    name: Lint, typecheck, and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+
+      - name: Offline python test suite
+        run: nix develop -c python test_context_fix.py
+
+      - name: Typecheck (pyright)
+        run: nix develop -c pyright main.py org_vector
+
+      - name: Format check (black)
+        run: nix develop -c black --check main.py org_vector tests
+
+      - name: Lint (flake8)
+        run: nix develop -c flake8 main.py org_vector tests
+
+      - name: Emacs lisp tests (ERT)
+        run: >
+          nix develop -c emacs --batch -l tests/org-vector-test.el
+          -f ert-run-tests-batch-and-exit
+
+      - name: Byte-compile org-vector.el
+        run: >
+          nix develop -c emacs --batch -f batch-byte-compile lisp/org-vector.el
+
+  build:
+    name: Build and smoke checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+
+      - name: Build package
+        run: nix build .#
+
+      - name: CLI help smoke check
+        run: nix run .# -- --help > /dev/null
+
+      - name: Embed without --dir must fail
+        run: >
+          if nix run .# -- embed --path /tmp/ci-db 2>&1 |
+            grep -q -- "--dir is required for embed mode"; then
+            echo "ok: embed mode rejects missing --dir";
+          else
+            echo "expected failure output not found"; exit 1;
+          fi

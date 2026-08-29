@@ -1,10 +1,10 @@
 ;;; org-vector.el --- Org-Roam vector search integration -*- lexical-binding: t; -*-
 
 ;; Author: N545PY
-;; Version: 0.4
+;; Version: 0.5.0
 ;; Package-Requires: ((emacs "27.1") (transient "0.4") (gptel "0.9"))
 ;; Keywords: ai, org, vector, search, gptel
-;; URL: https://example.com/org-vector
+;; URL: https://github.com/lost-rob0t/org-vector
 
 ;;; Commentary:
 ;; A modern interface to the vectored-notes project.
@@ -15,6 +15,8 @@
 
 (require 'cl-lib)
 (require 'json)
+(require 'subr-x)
+(require 'transient)
 
 (defgroup org-vector nil
   "Org-Roam vector search integration."
@@ -135,8 +137,10 @@ If MODE is specified, adds it as the first positional argument."
   (let ((args (list)))
     (when mode
       (push mode args))
-    (push "-d" args)
-    (push (expand-file-name org-vector-dir) args)
+    ;; Only indexing/service modes consume the note directory.
+    (when (member mode '("embed" "update" "serve"))
+      (push "-d" args)
+      (push (expand-file-name org-vector-dir) args))
     (push "-p" args)
     (push (expand-file-name org-vector-db) args)
     (push "-m" args)
@@ -186,43 +190,42 @@ If MODE is specified, adds it as the first positional argument."
 
 (defun org-vector--search-finished (process event query)
   "Handle completion of search PROCESS with EVENT for QUERY."
-  (let ((buf (get-buffer "*Org Vector Results*")))
+  (let ((buf (get-buffer "*Org Vector Results*"))
+        (proc-buf (process-buffer process))
+        raw-output)
+    (when (buffer-live-p proc-buf)
+      (setq raw-output (with-current-buffer proc-buf (buffer-string))))
     (when (buffer-live-p buf)
       (with-current-buffer buf
-        (let ((inhibit-read-only t))
+        (let ((inhibit-read-only t)
+              (filtered-output (org-vector--filter-output (or raw-output ""))))
           (cond
            ((string-match-p "finished" event)
-            (let* ((raw-output (with-current-buffer (process-buffer process)
-                                (buffer-string)))
-                   (filtered-output (org-vector--filter-output raw-output)))
-              (erase-buffer)
-              (org-mode)
-              (insert (format "* Vector Search: %s\n\n" query))
-              (if (string-empty-p (string-trim filtered-output))
-                  (insert "No results found.\n\n")
-                (insert filtered-output)
-                (insert "\n"))
-              (insert "Search completed. Use M-x org-vector-search to search again.\n")
-              (goto-char (point-min))
-              (message "Vector search completed")))
+            (erase-buffer)
+            (org-mode)
+            (insert (format "* Vector Search: %s\n\n" query))
+            (if (string-empty-p (string-trim filtered-output))
+                (insert "No results found.\n\n")
+              (insert filtered-output)
+              (insert "\n"))
+            (insert "Search completed. Use M-x org-vector-search to search again.\n")
+            (goto-char (point-min))
+            (message "Vector search completed"))
            ((string-match-p "exited abnormally\\|failed" event)
-            (let* ((raw-error-output (with-current-buffer (process-buffer process)
-                                      (buffer-string)))
-                   (filtered-error-output (org-vector--filter-output raw-error-output)))
-              (erase-buffer)
-              (org-mode)
-              (insert (format "* Vector Search: %s\n\n" query))
-              (insert "** Error occurred during search:\n\n")
-              (if (string-empty-p (string-trim filtered-error-output))
-                  (insert "Unknown error - check Python script and dependencies.\n\n")
-                (insert (format "#+BEGIN_EXAMPLE\n%s#+END_EXAMPLE\n\n" filtered-error-output)))
-              (insert "** Troubleshooting:\n")
-              (insert "- Verify that the model is downloaded\n")
-              (insert "- Ensure the vector database has been created (run M-x org-vector-embed)\n")
-              (insert "- Check Python dependencies\n\n")
-              (insert "Use M-x org-vector-search to try again.\n")
-              (goto-char (point-min))
-              (message "Vector search failed - check *Org Vector Results* buffer")))
+            (erase-buffer)
+            (org-mode)
+            (insert (format "* Vector Search: %s\n\n" query))
+            (insert "** Error occurred during search:\n\n")
+            (if (string-empty-p (string-trim filtered-output))
+                (insert "Unknown error - check Python script and dependencies.\n\n")
+              (insert (format "#+BEGIN_EXAMPLE\n%s#+END_EXAMPLE\n\n" filtered-output)))
+            (insert "** Troubleshooting:\n")
+            (insert "- Verify that the model is downloaded\n")
+            (insert "- Ensure the vector database has been created (run M-x org-vector-embed)\n")
+            (insert "- Check Python dependencies\n\n")
+            (insert "Use M-x org-vector-search to try again.\n")
+            (goto-char (point-min))
+            (message "Vector search failed - check *Org Vector Results* buffer"))
            (t
             (erase-buffer)
             (org-mode)
@@ -235,9 +238,8 @@ If MODE is specified, adds it as the first positional argument."
     (when (eq process org-vector--search-process)
       (setq org-vector--search-process nil))
     ;; Clean up process buffer
-    (when-let ((proc-buf (process-buffer process)))
-      (when (buffer-live-p proc-buf)
-        (kill-buffer proc-buf)))))
+    (when (and proc-buf (buffer-live-p proc-buf))
+      (kill-buffer proc-buf))))
 
 (defun org-vector--run-search-async (query)
   "Run an async vector search for QUERY."
@@ -263,7 +265,7 @@ If MODE is specified, adds it as the first positional argument."
 
 ;;;###autoload
 (defun org-vector-search (query)
-  "Interactively run a vector search for QUERY and display results in a side buffer."
+  "Run a vector search for QUERY and display results in a side buffer."
   (interactive "sVector search query: ")
   (if (string-empty-p (string-trim query))
       (message "Query cannot be empty")
@@ -407,43 +409,30 @@ If MODE is specified, adds it as the first positional argument."
 
 (defun org-vector--query-sync (query &optional k)
   "Query the vector store synchronously for QUERY, returning K results.
-Returns a list of result documents with metadata."
-  (let* ((temp-file (make-temp-file "org-vector-"))
-         (k-val (or k 5))
-          (command (append (list (org-vector--resolve-command))
+Returns a list of result documents parsed from the JSON output."
+  (let* ((k-val (or k 5))
+         (command (append (list (org-vector--resolve-command))
                           (org-vector--build-base-args "json")
                           (list "-q" query
                                 "-k" (number-to-string k-val))))
          (output "")
-         (exit-code nil))
-    
-    (with-temp-file temp-file
-      (insert ""))
-    
-    (setq exit-code
-          (with-temp-buffer
-            (apply #'call-process
-                   (car command)
-                   nil t nil
-                   (cdr command))
-            (setq output (buffer-string))
-            (point)))
-    
-    (unwind-protect
-        (if (zerop exit-code)
-            (let ((results '())
-                  (lines (split-string output "\n")))
-              (dolist (line lines)
-                (when (and (not (string-empty-p line))
-                          (string-prefix-p "{" line))
-                  (condition-case err
-                      (push (json-read-from-string line) results)
-                    (error nil))))
-              (setq org-vector--last-results results)
-              results)
-          (error "Query failed: %s" (org-vector--filter-output output)))
-      (when (file-exists-p temp-file)
-        (delete-file temp-file)))))
+         (exit-code 0))
+    (with-temp-buffer
+      (setq exit-code
+            (apply #'call-process (car command) nil t nil (cdr command)))
+      (setq output (buffer-string)))
+    (if (zerop exit-code)
+        (let ((results '()))
+          (dolist (line (split-string output "\n"))
+            (when (string-prefix-p "{" line)
+              (condition-case _
+                  (push (json-read-from-string line) results)
+                (error nil))))
+          (setq org-vector--last-results (nreverse results))
+          org-vector--last-results)
+      (error "org-vector query failed (exit %s): %s"
+             exit-code
+             (org-vector--filter-output output)))))
 
 (defun org-vector--format-result-for-gptel (result)
   "Format a single RESULT for gptel context."
@@ -507,35 +496,31 @@ This is useful for augmenting gptel prompts with relevant notes."
 
 ;; Transient menu
 
-;;;###autoload
-(with-eval-after-load 'transient
-  (transient-define-prefix org-vector-menu ()
-    "Org-Vector search and indexing menu."
-    ["Org-Vector: Vector Search for Org-Roam"
-     ["Search"
-      ("s" "Search..." org-vector-search)
-      ("S" "Search at point" org-vector-search-at-point)
-      ("c" "Cancel search" org-vector-stop-search)]
-     ["Index"
-      ("i" "Index/embed files" org-vector-embed)
-      ("C" "Cancel embedding" org-vector-stop-embed)]
-     ["Service"
-      ("b" "Start background service" org-vector-start-service)
-      ("e" "Stop background service" org-vector-stop-service)
-      ("t" "Service status" org-vector-service-status)]
-     ["Tools"
-      ("g" "Insert gptel results" org-vector-gptel-query)
-      ("k" "Kill all processes" org-vector-stop-all)]
-     ["Settings"
-      ("o" "Customize" (lambda () (interactive) (customize-group 'org-vector)))]]))
+(transient-define-prefix org-vector-menu ()
+  "Org-Vector search and indexing menu."
+  ["Org-Vector: Vector Search for Org-Roam"
+   ["Search"
+    ("s" "Search..." org-vector-search)
+    ("S" "Search at point" org-vector-search-at-point)
+    ("c" "Cancel search" org-vector-stop-search)]
+   ["Index"
+    ("i" "Index/embed files" org-vector-embed)
+    ("C" "Cancel embedding" org-vector-stop-embed)]
+   ["Service"
+    ("b" "Start background service" org-vector-start-service)
+    ("e" "Stop background service" org-vector-stop-service)
+    ("t" "Service status" org-vector-service-status)]
+   ["Tools"
+    ("g" "Insert gptel results" org-vector-gptel-query)
+    ("k" "Kill all processes" org-vector-stop-all)]
+   ["Settings"
+    ("o" "Customize" (lambda () (interactive) (customize-group 'org-vector)))]])
 
 ;;;###autoload
 (defun org-vector-transient ()
   "Open the org-vector transient menu."
   (interactive)
-  (if (fboundp 'org-vector-menu)
-      (org-vector-menu)
-    (error "Transient not available. Please install the transient package")))
+  (org-vector-menu))
 
 (provide 'org-vector)
 ;;; org-vector.el ends here
