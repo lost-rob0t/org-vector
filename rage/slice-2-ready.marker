@@ -1,0 +1,5 @@
+AUTO RAGE
+slice=4
+state=READY_FOR_RED
+human_gate=false
+depends_on=3
