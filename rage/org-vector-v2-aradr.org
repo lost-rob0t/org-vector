@@ -1,0 +1,446 @@
+#+title: ARADR — org-vector v2 generic embedding/retrieval platform
+#+author: AUTO RAGE seed
+#+startup: overview
+
+* Run identity
+- Repository :: =lost-rob0t/org-vector=
+- Seed issue :: =#2=
+- Mode :: =AUTO RAGE=
+- Research branch :: =aradr/org-vector-v2=
+- Start commit :: =7dc56eec47be06a2df5bfe7dfe4ceb17167372a4=
+- Merge authority :: not implied by AUTO RAGE; keep implementation on branches until separately authorized
+
+* Intent
+Turn org-vector from an Org-roam-focused command-line utility into a reusable local embedding and retrieval platform.
+
+Org remains a first-class source type and Emacs remains a first-class interface, but neither may define the storage, chunk, or retrieval architecture.
+
+The target product has two explicit retrieval layers:
+
+1. =search= — low-level retrieval. No LLM required. Return ranked chunks/documents and stable source metadata.
+2. =ask= — explicit AI/RAG layer. Retrieve evidence, ask a configured model, and return a grounded answer with source references.
+
+The low-level library must remain usable with zero LLM provider configured.
+
+* Existing baseline to preserve
+The current code already provides useful invariants that should survive the makeover:
+
+- incremental source synchronization
+- source deletion cleanup
+- replacement of stale chunks on re-index
+- deterministic storage IDs
+- batch embedding
+- result diversification
+- background inotify indexing
+- CLI aliases =query/search= and =update/embed=
+- Emacs async search, transient, background service commands, and a gptel search tool
+- offline deterministic tests and ERT coverage
+
+The redesign should migrate these behaviors behind cleaner interfaces rather than deleting them and rebuilding from nothing.
+
+* Product requirements
+** Library-first API
+The primary artifact becomes an importable library. CLI, service, MCP, Emacs, and gptel must all call public library/service contracts rather than duplicating ingestion and retrieval logic.
+
+Candidate public operations, exact names subject to design:
+
+- =open_index(config)=
+- =index(source_or_document)=
+- =sync(source)=
+- =delete(source_or_id)=
+- =search(query, ...)=
+- =get(id)=
+- =collections()=
+- =status()=
+- =ask(question, ...)=  ; higher layer only
+
+Public operations should return typed result objects rather than CLI-shaped dictionaries.
+
+** Canonical content model
+Research and freeze a stable model for:
+
+- Source
+- Document
+- Chunk
+- Location / span
+- Metadata
+- Embedding record
+- Collection / namespace
+- Index revision
+
+A document must be able to represent Org notes, ordinary text, Markdown, code files, generated/ad-hoc text, and future adapters.
+
+Every chunk must retain enough provenance to jump back to its source. For code this includes byte/line ranges and syntax identity where available. For Org this includes heading/path/ID information.
+
+** Whole-document + chunk indexing
+Support configurable index granularity:
+
+- =document= — one vector for the entire note/document where model limits permit it
+- =chunks= — vectors for parsed/chunked content
+- =both= — document summary/retrieval vector plus chunk vectors
+
+The design must prevent =both= from polluting top-k results with duplicate representations. Whole-document and chunk records need an explicit granularity/type field and retrieval policy.
+
+For documents exceeding model/token limits, research whether whole-document indexing means truncation, hierarchical pooling/summary embeddings, or a separate aggregate embedding. Do not silently truncate without recording the policy.
+
+** Generic configured sources
+Replace the single Org directory assumption with named sources.
+
+Target configuration shape (illustrative, not frozen):
+
+#+begin_src toml
+[index]
+path = "~/.cache/org-vector"
+backend = "chroma"
+model = "sentence-transformers/all-MiniLM-L6-v2"
+
+[[source]]
+name = "notes"
+paths = ["~/Documents/Notes"]
+recursive = true
+include = ["**/*.org", "**/*.md", "**/*.txt"]
+exclude = ["**/.git/**", "**/archive/**"]
+watch = true
+granularity = "both"
+
+[[source]]
+name = "code"
+paths = ["~/Documents/Projects"]
+recursive = true
+parser = "tree-sitter"
+include = ["**/*.py", "**/*.el", "**/*.lisp", "**/*.pl", "**/*.js", "**/*.ts", "**/*.rs", "**/*.nim"]
+exclude = ["**/.git/**", "**/node_modules/**", "**/target/**", "**/.direnv/**"]
+watch = false
+granularity = "chunks"
+#+end_src
+
+Research per-source overrides for model, collection, parser, chunker, metadata tags, instruction prefixes, watch policy, max file size, binary handling, and symlink behavior.
+
+** Ad-hoc ingestion
+The engine must index material that is not part of a configured watched path.
+
+Emacs transient actions should include at least:
+
+- embed region
+- embed current buffer
+- embed current file
+- embed arbitrary path
+- sync one configured source
+- sync all configured sources
+- raw search
+- ask question
+- inspect index/status
+
+Ad-hoc records need a stable provenance strategy and an explicit persistence/lifetime choice. Research persistent named ad-hoc documents vs ephemeral/session records rather than smuggling temporary strings into ordinary file identity.
+
+** Tree-sitter code indexing
+Code must not use naive fixed-character chunks as the preferred path.
+
+Research a Tree-sitter adapter that:
+
+- detects language from configured language/extension with override support
+- parses syntax trees once per changed file
+- extracts semantic units such as modules, functions, methods, classes, type/struct declarations, predicates where useful, top-level forms, and meaningful comments/docstrings
+- includes surrounding identity/context needed for retrieval (qualified name, imports/module, parent type, signature)
+- records line/byte ranges
+- combines tiny adjacent units when appropriate
+- splits huge syntax units deterministically
+- handles parse errors and unsupported languages with a deterministic text fallback
+- never requires an LLM to understand source code
+
+Research the maintenance cost of language-specific query tables vs generic named-node heuristics. Prefer Tree-sitter queries where they materially improve semantic chunks without creating an unmaintainable matrix.
+
+** Retrieval
+Low-level retrieval must be a reusable API independent of UI.
+
+Research:
+
+- dense vector search
+- metadata filtering
+- collection/source filtering
+- document-vs-chunk granularity filters
+- same-source diversification
+- optional lexical/BM25 hybrid retrieval
+- optional reranking as a separable stage
+- score normalization across backends
+- stable source references
+
+No LLM may be invoked by =search=.
+
+** AI question answering
+=ask= is a higher-level RAG service.
+
+Requirements:
+
+- explicit model/provider configuration
+- retrieves evidence through the same public retrieval API
+- bounded context budget
+- returns answer plus structured cited source records
+- distinguish model answer from retrieved text
+- expose prompt/context provenance enough to debug failures
+- provider interface should allow gptel/remote providers and local model backends without coupling the index core to one provider
+
+Research whether Emacs/gptel should perform generation client-side using retrieved results or call a server-side =ask= endpoint. MCP should support an explicit ask tool either way.
+
+** gptel
+Provide distinct tools/contracts:
+
+- =org_vector_search= — raw retrieval only
+- =org_vector_ask= — grounded AI answer
+
+Potentially expose =org_vector_index= only if write authority is explicit and safe. Research the expected gptel tool API and sync/async constraints against the current gptel version before implementation.
+
+** MCP
+Provide a standards-compliant MCP server over the library/service layer.
+
+Initial tool/resource research target:
+
+- search
+- ask
+- index_text / index_path
+- sync_source
+- get_document/get_chunk
+- list_sources
+- status
+
+Writes must have clear boundaries; do not let an MCP caller silently index arbitrary filesystem paths without an explicit configured/allowed-path policy.
+
+Research stdio first for local integrations and optional HTTP transport only if justified.
+
+** Emacs interface makeover
+Emacs should feel like a package, not a shell wrapper.
+
+Research/design:
+
+- transient organized into Index / Search / Ask / Service / Inspect groups
+- completion over configured source names/collections
+- tabulated or special-mode results buffer
+- per-result score, source, type/granularity, heading/symbol, line range, collection
+- RET/open action and other-window action
+- source preview
+- refine/re-run query
+- filters
+- live status/progress for long indexing jobs
+- non-blocking operations by default
+- clean cancellation
+- clear errors with process/service logs
+
+Keep compatibility commands as wrappers where reasonable.
+
+* Scale requirements
+"Large" must become measurable, not vibes.
+
+ARADR must define and benchmark at least three corpus tiers, for example:
+
+- small: 10k chunks
+- medium: 250k chunks
+- large: 1m+ chunks
+
+Exact thresholds should be revised based on measurements.
+
+Measure:
+
+- initial indexing throughput
+- incremental no-op scan time
+- changed-file update latency
+- deletion latency/correctness
+- peak RSS during embedding
+- index disk size
+- cold-start time
+- p50/p95 query latency
+- watcher backlog behavior
+- crash/restart consistency
+
+Architecture requirements:
+
+- streaming discovery, not reading whole corpora into RAM
+- bounded embedding batches
+- stable content/source fingerprints
+- incremental updates
+- durable manifest/index metadata
+- batched backend writes
+- bounded concurrency/backpressure
+- observability/progress
+- resumable or safely repeatable indexing
+
+* Backend research
+Current Chroma support is compatibility surface, not necessarily the forever architecture.
+
+Create a backend protocol that is narrow enough to allow evaluation of Chroma and alternatives without contaminating parsers/embedders with backend details.
+
+Evaluate candidate backends on:
+
+- local-first install/packaging
+- million-scale query/index behavior
+- metadata filters
+- upsert/delete semantics
+- persistence/recovery
+- concurrency
+- embedding dimension/model migrations
+- hybrid retrieval support
+- operational complexity
+
+Do not migrate backend merely because another backend is fashionable. A migration requires measured benefit and a compatibility plan.
+
+* Proposed component boundaries
+Names are provisional.
+
+| Area | Responsibility |
+|-
+| =documents= | typed Source/Document/Chunk/provenance model |
+| =sources= | configured path/source discovery and manifests |
+| =parsers= | format adapters: Org, text, Markdown, code |
+| =chunkers= | generic and parser-specific chunk policies |
+| =embedders= | embedding provider/model abstraction and batching |
+| =indexes= | backend protocol, Chroma adapter, metadata lifecycle |
+| =retrieval= | search/filter/diversify/hybrid/rerank pipeline |
+| =qa= | explicit LLM-backed grounded answering |
+| =service= | long-lived sync/watch/query service |
+| =mcp= | MCP adapter over service/library contracts |
+| =cli= | command line adapter |
+| =lisp/org-vector.el= | Emacs UI/client/gptel integration |
+
+* ARADR research workstreams
+** R1 — Public library and canonical data model
+Questions:
+- What are the minimal stable types and operations?
+- Which existing =VectorClient= methods map cleanly and which are CLI-era leakage?
+- How are sync plans/results represented?
+- How are IDs derived across files, whole documents, chunks, regions, and code symbols?
+
+Deliverable: API/data-model design + compatibility map + failing contract tests.
+
+** R2 — Source configuration and manifests
+Questions:
+- Multiple paths/source names and per-source overrides
+- include/exclude semantics
+- path normalization/symlinks
+- fingerprints and deletion detection
+- watch integration
+
+Deliverable: config schema + manifest state machine + migration from current =[service]= config.
+
+** R3 — Parser/chunker plugin architecture
+Questions:
+- Adapter protocol
+- Org behavior preservation
+- plain text/Markdown defaults
+- whole-document mode
+- unknown format behavior
+
+Deliverable: parser/chunker contract and fixture matrix.
+
+** R4 — Tree-sitter code
+Questions:
+- supported-language bootstrap set
+- grammar packaging in Nix/Python
+- syntax unit queries
+- malformed/partial code behavior
+- metadata and jump-to-source contract
+
+Deliverable: code chunk schema + language fixtures + red tests.
+
+** R5 — Index/backend/scale
+Questions:
+- backend protocol
+- current Chroma limits under realistic corpora
+- manifest vs backend metadata ownership
+- migrations/re-embedding/model dimension changes
+- concurrency/backpressure
+
+Deliverable: benchmark harness and backend ADR.
+
+** R6 — Retrieval + QA
+Questions:
+- dense vs hybrid
+- filtering/diversification/reranking
+- citation contract
+- QA provider abstraction
+- context budgeting
+
+Deliverable: search result schema, QA result schema, quality test corpus.
+
+** R7 — MCP + service
+Questions:
+- service boundary and lifecycle
+- stdio MCP vs daemon-mediated MCP
+- allowed path/write authority
+- status/progress/cancellation
+
+Deliverable: MCP tool/resource schema + integration tests.
+
+** R8 — Emacs/gptel UX
+Questions:
+- transient layout
+- result mode
+- async process/service client design
+- gptel raw search vs ask contracts
+- ad-hoc indexing UX
+
+Deliverable: UX spec, ERT acceptance tests, compatibility map.
+
+* Initial dependency graph
+#+begin_src text
+R1 data model/library
+ |\
+ | +--> R2 sources/config ----+
+ | +--> R3 parsers/chunkers --+--> R5 index/scale --> R6 retrieval/QA
+ |          |
+ |          +--> R4 tree-sitter code
+ |                                  \
+ +-----------------------------------+--> R7 MCP/service
+                                      +--> R8 Emacs/gptel
+#+end_src
+
+R1 should be the first implementation slice because every UI/service feature otherwise risks binding to the current Org-only structures.
+
+* AUTO RAGE execution policy
+This request explicitly selects AUTO RAGE for this program.
+
+AUTO RAGE may:
+
+- deepen research and update this Org document
+- create supporting Org ADR/research files
+- create/update issues for coherent slices
+- create implementation branches
+- write failing tests first
+- implement safe coherent slices after their design/acceptance criteria are materialized
+- run local deterministic gates and CI where appropriate
+- open PRs with exact-head evidence
+
+AUTO RAGE must not infer permission to:
+
+- merge PRs
+- delete unrelated user data/indexes
+- publish credentials or private corpora
+- weaken tests/gates to obtain green
+- hide backend/data migrations
+
+* First realization slice — canonical library contracts
+Status: =READY_FOR_RED_TEST_DESIGN=
+
+The first slice should not attempt Tree-sitter, MCP, or a new UI yet.
+
+Goal: introduce canonical =Document/Chunk/SourceRef/SearchResult= style types and a public library facade while wrapping the current Org/Chroma implementation underneath. Preserve existing CLI behavior.
+
+Acceptance criteria:
+
+1. Python callers can construct/index a generic in-memory text document without creating an Org file.
+2. Python callers can search through a public library API and receive typed source-aware results.
+3. Org ingestion maps into the same canonical document/chunk types.
+4. Existing CLI =search/query/embed/update= behavior remains green.
+5. Existing deterministic IDs/incremental behavior remains green.
+6. No public low-level API imports gptel/MCP/LLM provider code.
+7. Tests use fake embedder/index backend and run offline.
+
+RED proof should be a new contract test showing that the current library cannot index a generic canonical document through a stable public API.
+
+* Open research decisions
+- Whole-document embedding policy for over-context documents
+- Whether Markdown deserves structural parsing in v2 bootstrap or generic text first
+- Initial Tree-sitter language set
+- Whether hybrid retrieval belongs in v2 core or a later backend capability
+- Server-side vs client-side generation for gptel =ask=
+- Long-term vector backend after benchmarks
+
+These are research questions, not blockers for the first library-contract slice.
