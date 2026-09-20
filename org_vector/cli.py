@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from typing import Any, Dict, List, Optional
 
 import org_vector.embeddings as e
@@ -157,6 +158,7 @@ def main(
     )
 
     if mode == "embed":
+        started_at = time.monotonic()
         roam = o.OrgRoam(roam_dir)
         file_paths = roam.get_files(get_full=True)
         sync_plan = vector_client.plan_sync(file_paths)
@@ -168,14 +170,25 @@ def main(
         )
 
         parse_failed = len(files_to_index) - len(files)
-        print(
-            "Embed sync complete: "
-            f"indexed={sync_stats['indexed']} "
-            f"unchanged={len(sync_plan['unchanged'])} "
-            f"removed={sync_stats['removed']} "
-            f"parse_failed={parse_failed} "
-            f"embed_failed={sync_stats['failed']}"
-        )
+        summary = {
+            "files_indexed": sync_stats["indexed"],
+            "files_skipped": len(sync_plan["unchanged"]),
+            "files_removed": sync_stats["removed"],
+            "duration_seconds": round(time.monotonic() - started_at, 3),
+            "model": vector_client.model_name,
+            "db_path": vector_client.db_path,
+        }
+        if as_json:
+            print(json.dumps(summary))
+        else:
+            print(
+                "Embed sync complete: "
+                f"indexed={sync_stats['indexed']} "
+                f"unchanged={len(sync_plan['unchanged'])} "
+                f"removed={sync_stats['removed']} "
+                f"parse_failed={parse_failed} "
+                f"embed_failed={sync_stats['failed']}"
+            )
 
     elif mode == "search":
         for result in vector_client.query(query, k=results):

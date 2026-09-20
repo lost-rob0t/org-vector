@@ -66,6 +66,14 @@ python main.py stats --path ~/.cache/org-vector/ --json
   instead of erroring, so health checks are safe before the first embed.
 - The =last_embed= timestamp is written into collection metadata every time
   an embed/update sync completes.
+- =embed= and =update= accept =--json= to print a machine-readable sync
+  summary instead of the human line, with exactly these keys:
+  =files_indexed=, =files_skipped=, =files_removed=, =duration_seconds=,
+  =model=, and =db_path=. Human output is unchanged when =--json= is absent.
+
+#+begin_src bash
+python main.py embed --dir ~/org --path ~/.cache/org-vector/ --json
+#+end_src
 
 ** Emacs Integration
 
