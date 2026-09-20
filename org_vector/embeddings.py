@@ -1,22 +1,44 @@
 import hashlib
+import logging
 import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
-os.environ.setdefault(
-    "CHROMA_TELEMETRY_IMPL", "chromadb.telemetry.product.null.NullTelemetry"
-)
+_TELEMETRY_LOGGER_NAMES = ("posthog", "chromadb.telemetry")
 
-try:
-    import posthog
 
-    def _capture_noop(*args, **kwargs):
-        return None
+def suppress_chromadb_telemetry() -> None:
+    """Keep chromadb telemetry and its failure noise off stderr.
 
-    posthog.capture = _capture_noop
-except Exception:
-    pass
+    Sets the anonymized-telemetry switches supported by the pinned chromadb,
+    no-ops ``posthog.capture`` (its signature churn produces the classic
+    "capture() takes 1 positional argument" / "Failed to send telemetry"
+    stderr lines), and silences the loggers that report failed sends. Safe
+    to call repeatedly; must run before chromadb is imported, so it is
+    invoked at module import below.
+    """
+    os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+    os.environ.setdefault(
+        "CHROMA_TELEMETRY_IMPL", "chromadb.telemetry.product.null.NullTelemetry"
+    )
+
+    try:
+        import posthog
+
+        def _capture_noop(*args, **kwargs):
+            return None
+
+        posthog.capture = _capture_noop
+    except Exception:
+        pass
+
+    for name in _TELEMETRY_LOGGER_NAMES:
+        telemetry_logger = logging.getLogger(name)
+        telemetry_logger.setLevel(logging.CRITICAL)
+        telemetry_logger.propagate = False
+
+
+suppress_chromadb_telemetry()
 
 # NOTE: env vars and the telemetry shim above must run before these imports.
 from chromadb import PersistentClient  # noqa: E402

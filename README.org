@@ -75,6 +75,11 @@ python main.py stats --path ~/.cache/org-vector/ --json
 python main.py embed --dir ~/org --path ~/.cache/org-vector/ --json
 #+end_src
 
+- chromadb telemetry is suppressed at import time (anonymized-telemetry env
+  switches, a =posthog.capture= no-op, and silenced telemetry loggers), so
+  stderr stays clean by default for machine consumers such as the Emacs
+  client. The Emacs-side telemetry line filters remain harmless.
+
 ** Emacs Integration
 
 =lisp/org-vector.el= ships with the package (installed to
