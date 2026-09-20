@@ -46,6 +46,13 @@ class FakeCollection:
             metas.append(meta)
         return {"metadatas": metas}
 
+    def count(self):
+        return len(self.entries)
+
+    def modify(self, name=None, metadata=None):
+        if metadata is not None:
+            self.metadata = dict(metadata)
+
     def peek(self, limit=1, include=None):
         embeddings = [
             entry["embedding"] for entry in list(self.entries.values())[:limit]
@@ -114,6 +121,10 @@ class FakeChromaClient:
         self.collection.name = name
         if metadata:
             self.collection.metadata = metadata
+        return self.collection
+
+    def get_collection(self, name="org-roam", **kwargs):
+        self.collection.name = name
         return self.collection
 
     def delete_collection(self, name):

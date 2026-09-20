@@ -150,6 +150,9 @@ Follow existing repository conventions (PEP 8 plus pragmatic typing).
 7. Missing Org IDs get deterministic fallback storage IDs.
 8. Retrieval should avoid repetitive same-file top results.
 9. `serve` uses incremental embed/update semantics and reacts to file changes via inotify.
+10. `stats` prints index health and degrades gracefully (zero counts, no error) when the db/collection is missing.
+11. `--json` output is a stable contract for machine consumers: `stats --json` keys are `db_path`, `collection`, `model`, `total_chunks`, `source_files`, `last_embed`, `db_size_bytes`, `db_exists`; `embed/update --json` keys are `files_indexed`, `files_skipped`, `files_removed`, `duration_seconds`, `model`, `db_path`. Do not remove or rename keys.
+12. `sync_files` records a `last_embed` UTC timestamp in collection metadata; `collection_stats` reads it best-effort.
 
 ## Agent workflow checklist
 1. Read local context before editing.

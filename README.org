@@ -48,6 +48,25 @@ python main.py search --query "Python code" --results 10
 
 - Ingest now skips path matches like directories that happen to end in =.org=.
 
+** Index Stats and Machine-Readable Output
+
+- =stats= prints index health: collection name, model, total indexed chunks,
+  distinct source files, last-embed timestamp, database path, and database
+  size on disk.
+
+#+begin_src bash
+python main.py stats --path ~/.cache/org-vector/
+python main.py stats --path ~/.cache/org-vector/ --json
+#+end_src
+
+- With =--json=, =stats= prints a single JSON object with exactly these keys:
+  =db_path=, =collection=, =model=, =total_chunks=, =source_files=,
+  =last_embed= (ISO 8601 UTC timestamp or =null=), =db_size_bytes=, and
+  =db_exists=. A missing database or collection degrades to zero counts
+  instead of erroring, so health checks are safe before the first embed.
+- The =last_embed= timestamp is written into collection metadata every time
+  an embed/update sync completes.
+
 ** Emacs Integration
 
 =lisp/org-vector.el= ships with the package (installed to

@@ -2,7 +2,7 @@ import argparse
 import json
 import os
 import sys
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import org_vector.embeddings as e
 import org_vector.parse_org_files as o
@@ -38,9 +38,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "mode",
-        choices=["embed", "update", "search", "query", "emacs", "json", "serve"],
-        help="Mode: embed/update sync, search/query retrieval, "
-        "or serve for inotify background indexing.",
+        choices=[
+            "embed",
+            "update",
+            "search",
+            "query",
+            "emacs",
+            "json",
+            "stats",
+            "serve",
+        ],
+        help="Mode: embed/update sync, search/query retrieval, stats index "
+        "health, or serve for inotify background indexing.",
     )
     parser.add_argument("--dir", "-d", help="Org roam directory")
     parser.add_argument("--model", "-m", help="embeddings model")
@@ -62,6 +71,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional instruction prefix/template for query embeddings",
     )
     parser.add_argument("--collection", "-c", help="collection name for database")
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print machine-readable JSON output (stats and embed/update modes)",
+    )
     parser.add_argument(
         "--config",
         default=DEFAULT_CONFIG_PATH,
@@ -98,6 +112,16 @@ def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
         parser.error("--query is required for search/query output modes")
 
 
+def _print_stats_human(stats: Dict[str, Any]) -> None:
+    print(f"Collection: {stats['collection']}")
+    print(f"Model: {stats['model']}")
+    print(f"Chunks: {stats['total_chunks']}")
+    print(f"Files: {stats['source_files']}")
+    print(f"Last embed: {stats['last_embed'] or 'unknown'}")
+    print(f"DB path: {stats['db_path']}")
+    print(f"DB size: {stats['db_size_bytes']} bytes")
+
+
 def main(
     mode: str,
     query: str,
@@ -108,8 +132,22 @@ def main(
     ingestion_instructions: Optional[str] = None,
     query_instructions: Optional[str] = None,
     results: int = DEFAULT_RESULTS,
+    as_json: bool = False,
 ) -> None:
     mode = normalize_mode(mode)
+
+    if mode == "stats":
+        stats = e.collection_stats(
+            db_path=path,
+            collection_name=collection_name,
+            model_name=model,
+        )
+        if as_json:
+            print(json.dumps(stats))
+        else:
+            _print_stats_human(stats)
+        return
+
     vector_client = e.VectorClient(
         model_name=model,
         db_path=path,
@@ -234,6 +272,7 @@ def run(argv: Optional[List[str]] = None) -> int:
         ingestion_instructions=args.ingestion_instructions,
         query_instructions=args.query_instructions,
         results=args.results,
+        as_json=args.json,
     )
     return 0
 
