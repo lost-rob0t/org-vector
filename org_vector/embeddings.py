@@ -1,21 +1,44 @@
 import hashlib
+import logging
 import os
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
-os.environ.setdefault(
-    "CHROMA_TELEMETRY_IMPL", "chromadb.telemetry.product.null.NullTelemetry"
-)
+_TELEMETRY_LOGGER_NAMES = ("posthog", "chromadb.telemetry")
 
-try:
-    import posthog
 
-    def _capture_noop(*args, **kwargs):
-        return None
+def suppress_chromadb_telemetry() -> None:
+    """Keep chromadb telemetry and its failure noise off stderr.
 
-    posthog.capture = _capture_noop
-except Exception:
-    pass
+    Sets the anonymized-telemetry switches supported by the pinned chromadb,
+    no-ops ``posthog.capture`` (its signature churn produces the classic
+    "capture() takes 1 positional argument" / "Failed to send telemetry"
+    stderr lines), and silences the loggers that report failed sends. Safe
+    to call repeatedly; must run before chromadb is imported, so it is
+    invoked at module import below.
+    """
+    os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+    os.environ.setdefault(
+        "CHROMA_TELEMETRY_IMPL", "chromadb.telemetry.product.null.NullTelemetry"
+    )
+
+    try:
+        import posthog
+
+        def _capture_noop(*args, **kwargs):
+            return None
+
+        posthog.capture = _capture_noop
+    except Exception:
+        pass
+
+    for name in _TELEMETRY_LOGGER_NAMES:
+        telemetry_logger = logging.getLogger(name)
+        telemetry_logger.setLevel(logging.CRITICAL)
+        telemetry_logger.propagate = False
+
+
+suppress_chromadb_telemetry()
 
 # NOTE: env vars and the telemetry shim above must run before these imports.
 from chromadb import PersistentClient  # noqa: E402
@@ -27,6 +50,81 @@ from org_vector.parse_org_files import OrgNode, OrgFile  # noqa: E402
 from org_vector.logger import get_logger  # noqa: E402
 
 log = get_logger()
+
+
+def _directory_size(path: str) -> int:
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.path.getsize(os.path.join(root, name))
+            except OSError:
+                continue
+    return total
+
+
+def collection_stats(
+    db_path: str,
+    collection_name: str = "org-roam",
+    model_name: str = "all-MiniLM-L6-v2",
+    chroma_client: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """Best-effort index health snapshot for machine consumers.
+
+    Every field is always present; counts degrade to zero and ``last_embed``
+    to None when the database or collection is unavailable.
+    """
+    db_exists = os.path.isdir(db_path)
+    stats: Dict[str, Any] = {
+        "db_path": db_path,
+        "collection": collection_name,
+        "model": model_name,
+        "total_chunks": 0,
+        "source_files": 0,
+        "last_embed": None,
+        "db_size_bytes": 0,
+        "db_exists": db_exists,
+    }
+
+    if not db_exists:
+        return stats
+
+    if chroma_client is None:
+        chroma_client = PersistentClient(
+            path=db_path,
+            settings=Settings(anonymized_telemetry=False),
+        )
+
+    try:
+        collection = chroma_client.get_collection(name=collection_name)
+    except Exception:
+        return stats
+
+    metadata = getattr(collection, "metadata", None)
+    if isinstance(metadata, dict):
+        stats["model"] = metadata.get("embedding_model") or model_name
+        stats["last_embed"] = metadata.get("last_embed")
+
+    try:
+        stats["total_chunks"] = int(collection.count())
+    except Exception as error:
+        log.warning(f"Could not count chunks in '{collection_name}': {error}")
+
+    try:
+        results = collection.get(include=["metadatas"])
+    except Exception as error:
+        log.warning(f"Could not list source files in '{collection_name}': {error}")
+        results = {}
+
+    filepaths = {
+        entry_metadata.get("filepath")
+        for entry_metadata in results.get("metadatas") or []
+        if isinstance(entry_metadata, dict) and entry_metadata.get("filepath")
+    }
+    stats["source_files"] = len(filepaths)
+
+    stats["db_size_bytes"] = _directory_size(db_path)
+    return stats
 
 
 class VectorClient:
@@ -370,6 +468,20 @@ class VectorClient:
 
         return removed_count
 
+    def record_sync_completion(self) -> None:
+        """Best-effort: persist a last-embed timestamp in collection metadata.
+
+        Read by ``collection_stats``; failures are logged and ignored so sync
+        results are never affected.
+        """
+        timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        try:
+            metadata = dict(getattr(self.collection, "metadata", None) or {})
+            metadata["last_embed"] = timestamp
+            self.collection.modify(metadata=metadata)
+        except Exception as error:
+            log.warning(f"Could not record last-embed timestamp: {error}")
+
     def sync_files(
         self, org_files: List[OrgFile], removed_files: Optional[List[str]] = None
     ) -> Dict[str, int]:
@@ -384,6 +496,8 @@ class VectorClient:
             except Exception as error:
                 failed_count += 1
                 log.error(f"Failed to embed {org_file.file_path}: {error}")
+
+        self.record_sync_completion()
 
         return {
             "indexed": indexed_count,
